@@ -124,9 +124,9 @@ ifneq ($(DEMIKERNEL_REPO_DIR),)
 export DEMIKERNEL_INCLUDE_DIR ?= $(DEMIKERNEL_REPO_DIR)/include
 export DEMIKERNEL_LIBOS_SO ?= $(DEMIKERNEL_REPO_DIR)/target/release/libdemikernel.so
 export DEMIKERNEL_LIBRARY_PATH ?= $(HOME)/lib:$(shell find $(HOME)/lib/ -name '*x86_64-linux-gnu*' -type d | xargs | sed -e 's/\s/:/g')
-FINAL_CFLAGS+=-I $(DEMIKERNEL_INCLUDE_DIR) -D __DEMIKERNEL__
-FINAL_LDFLAGS+=-Wl,-rpath,$(DEMIKERNEL_LIBRARY_PATH)
-FINAL_LIBS+=$(DEMIKERNEL_LIBOS_SO)
+FINAL_CFLAGS+=-I /users/ygina/cornflakes/mlx5-datapath-c -I $(DEMIKERNEL_INCLUDE_DIR) -D __DEMIKERNEL__
+FINAL_LDFLAGS+=-L/users/ygina/cornflakes/target/release -Wl,-rpath,$(DEMIKERNEL_LIBRARY_PATH)
+FINAL_LIBS+=-lmlx5_datapath_c $(DEMIKERNEL_LIBOS_SO)
 endif
 
 # Linux ARM32 needs -latomic at linking time

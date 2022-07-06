@@ -37,6 +37,7 @@
 #include "mt19937-64.h"
 #include "functions.h"
 #include "syscheck.h"
+#include "mlx5_datapath.h"
 
 #include <time.h>
 #include <signal.h>
@@ -1915,7 +1916,7 @@ void initServerConfig(void) {
 
     /* Replication related */
     server.masterhost = NULL;
-    server.masterport = 6379;
+    server.masterport = 54323;
     server.master = NULL;
     server.cached_master = NULL;
     server.master_initial_offset = -1;
@@ -2584,6 +2585,13 @@ void initServer(void) {
      * expired keys and so forth. */
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         serverPanic("Can't create event loop timers.");
+        exit(1);
+    }
+
+    /* Initialize the MLX5 connection. */
+    server.conn = Mlx5Connection_new("/users/ygina/config.yaml", "192.168.1.1");
+    if (server.conn == NULL) {
+        serverLog(LL_WARNING, "Failed to initialize MLX5 connection.");
         exit(1);
     }
 

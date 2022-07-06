@@ -4000,7 +4000,7 @@ void processEventsWhileBlocked(void) {
     ProcessingEventsWhileBlocked++;
     while (iterations--) {
         long long startval = server.events_processed_while_blocked;
-        long long ae_events = aeProcessEvents(server.el,
+        long long ae_events = aeProcessEvents(server.el, server.conn,
             AE_FILE_EVENTS|AE_DONT_WAIT|
             AE_CALL_BEFORE_SLEEP|AE_CALL_AFTER_SLEEP);
         /* Note that server.events_processed_while_blocked will also get

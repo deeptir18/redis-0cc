@@ -33,6 +33,7 @@
 #include "ae.h"
 #include "anet.h"
 #include "redisassert.h"
+#include "mlx5_datapath.h"
 
 #include <stdio.h>
 #include <sys/time.h>
@@ -358,9 +359,15 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * if flags has AE_CALL_BEFORE_SLEEP set, the beforesleep callback is called.
  *
  * The function returns the number of events processed. */
-int aeProcessEvents(aeEventLoop *eventLoop, int flags)
+int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
 {
     int processed = 0, numevents;
+    size_t n = 0;
+
+    if (conn == NULL) {
+        printf("Expected conn to not be NULL, called from aeMain?");
+        exit(1);
+    }
 
     /* Nothing to do? return ASAP */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
@@ -371,7 +378,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
      * to fire. */
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
-        int j;
+        size_t j;
         struct timeval tv, *tvp;
         int64_t usUntilTimer = -1;
 
@@ -405,44 +412,49 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
         /* Call the multiplexing API, will return only on timeout or when
          * some event fires. */
-        numevents = aeApiPoll(eventLoop, tvp);
+        // numevents = aeApiPoll(eventLoop, tvp);
+        struct ReceivedPkt* pkts = Mlx5Connection_pop(conn, &n);
+        if (n > 0) {
+            printf("Received %ld packets\n", n);
+        }
 
         /* After sleep callback. */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
 
         for (j = 0; j < numevents; j++) {
+            /*
             int fd = eventLoop->fired[j].fd;
             aeFileEvent *fe = &eventLoop->events[fd];
             int mask = eventLoop->fired[j].mask;
-            int fired = 0; /* Number of events fired for current fd. */
+            int fired = 0; // Number of events fired for current fd.
 
-            /* Normally we execute the readable event first, and the writable
-             * event later. This is useful as sometimes we may be able
-             * to serve the reply of a query immediately after processing the
-             * query.
-             *
-             * However if AE_BARRIER is set in the mask, our application is
-             * asking us to do the reverse: never fire the writable event
-             * after the readable. In such a case, we invert the calls.
-             * This is useful when, for instance, we want to do things
-             * in the beforeSleep() hook, like fsyncing a file to disk,
-             * before replying to a client. */
+            // Normally we execute the readable event first, and the writable
+            // event later. This is useful as sometimes we may be able
+            // to serve the reply of a query immediately after processing the
+            // query.
+            //
+            // However if AE_BARRIER is set in the mask, our application is
+            // asking us to do the reverse: never fire the writable event
+            // after the readable. In such a case, we invert the calls.
+            // This is useful when, for instance, we want to do things
+            // in the beforeSleep() hook, like fsyncing a file to disk,
+            // before replying to a client.
             int invert = fe->mask & AE_BARRIER;
 
-            /* Note the "fe->mask & mask & ..." code: maybe an already
-             * processed event removed an element that fired and we still
-             * didn't processed, so we check if the event is still valid.
-             *
-             * Fire the readable event if the call sequence is not
-             * inverted. */
+            // Note the "fe->mask & mask & ..." code: maybe an already
+            // processed event removed an element that fired and we still
+            // didn't processed, so we check if the event is still valid.
+            //
+            // Fire the readable event if the call sequence is not
+            // inverted.
             if (!invert && fe->mask & mask & AE_READABLE) {
                 fe->rfileProc(eventLoop,fd,fe->clientData,mask);
                 fired++;
-                fe = &eventLoop->events[fd]; /* Refresh in case of resize. */
+                fe = &eventLoop->events[fd]; // Refresh in case of resize.
             }
 
-            /* Fire the writable event. */
+            // Fire the writable event.
             if (fe->mask & mask & AE_WRITABLE) {
                 if (!fired || fe->wfileProc != fe->rfileProc) {
                     fe->wfileProc(eventLoop,fd,fe->clientData,mask);
@@ -450,10 +462,10 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
                 }
             }
 
-            /* If we have to invert the call, fire the readable event now
-             * after the writable one. */
+            // If we have to invert the call, fire the readable event now
+            // after the writable one.
             if (invert) {
-                fe = &eventLoop->events[fd]; /* Refresh in case of resize. */
+                fe = &eventLoop->events[fd]; // Refresh in case of resize.
                 if ((fe->mask & mask & AE_READABLE) &&
                     (!fired || fe->wfileProc != fe->rfileProc))
                 {
@@ -463,6 +475,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             }
 
             processed++;
+            */
         }
     }
     /* Check time events */
@@ -497,7 +510,7 @@ int aeWait(int fd, int mask, long long milliseconds) {
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
-        aeProcessEvents(eventLoop, AE_ALL_EVENTS|
+        aeProcessEvents(eventLoop, NULL, AE_ALL_EVENTS|
                                    AE_CALL_BEFORE_SLEEP|
                                    AE_CALL_AFTER_SLEEP);
     }

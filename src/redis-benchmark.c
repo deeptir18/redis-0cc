@@ -1023,7 +1023,7 @@ static void benchmark(const char *title, char *cmd, int len) {
     createMissingClients(c);
 
     config.start = mstime();
-    if (!config.num_threads) aeMain(config.el);
+    if (!config.num_threads) aeMain(config.el, NULL);
     else startBenchmarkThreads();
     config.totlatency = mstime()-config.start;
 
@@ -1063,7 +1063,7 @@ static void freeBenchmarkThreads() {
 
 static void *execBenchmarkThread(void *ptr) {
     benchmarkThread *thread = (benchmarkThread *) ptr;
-    aeMain(thread->el);
+    aeMain(thread->el, NULL);
     return NULL;
 }
 
@@ -1864,7 +1864,7 @@ int main(int argc, char **argv) {
         c = createClient("",0,NULL,thread_id); /* will never receive a reply */
         createMissingClients(c);
         if (use_threads) startBenchmarkThreads();
-        else aeMain(config.el);
+        else aeMain(config.el, NULL);
         /* and will wait for every */
     }
     if(config.csv){

@@ -2593,6 +2593,8 @@ void initServer(void) {
     if (server.conn == NULL) {
         serverLog(LL_WARNING, "Failed to initialize MLX5 connection.");
         exit(1);
+    } else {
+        serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
 
     /* Create an event handler for accepting new connections in TCP and Unix
@@ -7035,7 +7037,7 @@ int main(int argc, char **argv) {
     redisSetCpuAffinity(server.server_cpulist);
     setOOMScoreAdj(-1);
 
-    aeMain(server.el);
+    aeMain(server.el, server.conn);
     aeDeleteEventLoop(server.el);
     return 0;
 }

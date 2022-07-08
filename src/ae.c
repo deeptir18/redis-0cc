@@ -365,7 +365,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
     size_t n = 0;
 
     if (conn == NULL) {
-        printf("Expected conn to not be NULL, called from aeMain?");
+        printf("Expected conn != NULL, called from redis-benchmark.c?\n");
         exit(1);
     }
 
@@ -507,10 +507,10 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-void aeMain(aeEventLoop *eventLoop) {
+void aeMain(aeEventLoop *eventLoop, void* conn) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
-        aeProcessEvents(eventLoop, NULL, AE_ALL_EVENTS|
+        aeProcessEvents(eventLoop, conn, AE_ALL_EVENTS|
                                    AE_CALL_BEFORE_SLEEP|
                                    AE_CALL_AFTER_SLEEP);
     }

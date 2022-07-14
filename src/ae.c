@@ -34,6 +34,7 @@
 #include "anet.h"
 #include "redisassert.h"
 #include "mlx5_datapath.h"
+#include "kv_sga_cornflakes.h"
 
 #include <stdio.h>
 #include <sys/time.h>

@@ -423,7 +423,20 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
 
-        for (j = 0; j < numevents; j++) {
+        ReceivedPkt *pkt;
+        uint16_t msg_type, size;
+        for (j = 0; j < n; j++) {
+            // Read first four bytes of packet to determine message type.
+            pkt = &pkts[j];
+            msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
+            size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+            if (msg_type == 2) {  // GetM
+                printf("handling GetM(%d)\n", size);
+            } else {
+                printf("unrecognized message type for kv store app.\n");
+                exit(1);
+            }
+
             /*
             int fd = eventLoop->fired[j].fd;
             aeFileEvent *fe = &eventLoop->events[fd];

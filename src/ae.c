@@ -424,11 +424,15 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
             eventLoop->aftersleep(eventLoop);
 
         void* req;         // GetMReq*
+        void* res;         // GetMResp*
         const void* keys;  // VariableList_CFString**
         const void* key;   // CFString*
+        const void* vals;  // VariableList_CFByte**
         ReceivedPkt *pkt;
         uint16_t msg_type, size;
-        const unsigned char* buffer;  // used for reading a key from a CFString
+        uint32_t msg_id;
+        const unsigned char* key_buffer;
+        const unsigned char* val_buffer;
         size_t keys_len, buffer_len;
         for (j = 0; j < n; j++) {
             // Read first four bytes of packet to determine message type.
@@ -437,6 +441,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
             size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
             if (msg_type == 2) {  // GetM
                 printf("handling GetM(%d)\n", size);
+                // Deserialize the request
                 GetMReq_new(&req);
                 if (GetMReq_deserialize_from_buf(req,
                                                  pkt->data + 4,
@@ -444,15 +449,31 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
                     printf("Error deserializing GetReq\n");
                     continue;
                 }
+
+                // Initialize the response object
+                GetMResp_new(&res);
+                GetMReq_get_id(req, &msg_id);
+                GetMResp_set_id(res, msg_id);
+                printf("msg_id = %d\n", msg_id);
+
+                // Initialize the response values based on the request keys
                 GetMReq_get_keys(req, &keys);
                 VariableList_CFString_len(keys, &keys_len);
-                // Expect size to be the same as VariableList_len(keys)
+                GetMResp_init_vals(res, keys_len);
+                GetMResp_get_mut_vals(res, &vals);
+
+                // Populate the response by quering the request keys
                 assert(size == keys_len);
                 for (i = 0; i < keys_len; i++) {
                     VariableList_CFString_index(keys, i, &key);
-                    CFString_unpack(key, &buffer, &buffer_len);
+                    CFString_unpack(key, &key_buffer, &buffer_len);
+
                     // TODO: do something with the key
-                    printf("key = %.*s\n", (int)buffer_len, buffer);
+                    // Currently, uses the key as the value.
+                    // So many memory leaks in this code...
+                    printf("key = %.*s\n", (int)buffer_len, key_buffer);
+                    CFBytes_new(key_buffer, buffer_len, &val_buffer);
+                    VariableList_CFBytes_append(vals, val_buffer);
                 }
             } else {
                 printf("unrecognized message type for kv store app.\n");

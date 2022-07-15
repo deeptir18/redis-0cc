@@ -379,7 +379,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
      * to fire. */
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
-        size_t j;
+        size_t j, i;
         struct timeval tv, *tvp;
         int64_t usUntilTimer = -1;
 
@@ -423,8 +423,13 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
 
+        void* req;         // GetMReq*
+        const void* keys;  // VariableList_CFString**
+        const void* key;   // CFString*
         ReceivedPkt *pkt;
         uint16_t msg_type, size;
+        const unsigned char* buffer;  // used for reading a key from a CFString
+        size_t keys_len, buffer_len;
         for (j = 0; j < n; j++) {
             // Read first four bytes of packet to determine message type.
             pkt = &pkts[j];
@@ -432,6 +437,23 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
             size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
             if (msg_type == 2) {  // GetM
                 printf("handling GetM(%d)\n", size);
+                GetMReq_new(&req);
+                if (GetMReq_deserialize_from_buf(req,
+                                                 pkt->data + 4,
+                                                 pkt->data_len - 4) != 0) {
+                    printf("Error deserializing GetReq\n");
+                    continue;
+                }
+                GetMReq_get_keys(req, &keys);
+                VariableList_CFString_len(keys, &keys_len);
+                // Expect size to be the same as VariableList_len(keys)
+                assert(size == keys_len);
+                for (i = 0; i < keys_len; i++) {
+                    VariableList_CFString_index(keys, i, &key);
+                    CFString_unpack(key, &buffer, &buffer_len);
+                    // TODO: do something with the key
+                    printf("key = %.*s\n", (int)buffer_len, buffer);
+                }
             } else {
                 printf("unrecognized message type for kv store app.\n");
                 exit(1);

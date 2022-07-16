@@ -38,6 +38,7 @@
 #include "functions.h"
 #include "syscheck.h"
 #include "mlx5_datapath.h"
+#include "kv_sga_cornflakes.h"
 
 #include <time.h>
 #include <signal.h>
@@ -2596,6 +2597,14 @@ void initServer(void) {
     } else {
         serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
+
+    /* Initialize the bumpalo arena. */
+    Bump_with_capacity(
+        32,   // batch_size
+        9216, // max_packet_size (jumbo frames turned on)
+        32,   // max_entries
+        &server.arena
+    );
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */
@@ -7037,7 +7046,7 @@ int main(int argc, char **argv) {
     redisSetCpuAffinity(server.server_cpulist);
     setOOMScoreAdj(-1);
 
-    aeMain(server.el, server.conn);
+    aeMain(server.el, server.conn, server.arena);
     aeDeleteEventLoop(server.el);
     return 0;
 }

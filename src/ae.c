@@ -360,7 +360,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * if flags has AE_CALL_BEFORE_SLEEP set, the beforesleep callback is called.
  *
  * The function returns the number of events processed. */
-int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
+int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
 {
     int processed = 0, numevents;
     size_t n = 0;
@@ -479,6 +479,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, int flags)
                 printf("unrecognized message type for kv store app.\n");
                 exit(1);
             }
+            Bump_reset(arena);
 
             /*
             int fd = eventLoop->fired[j].fd;
@@ -564,10 +565,10 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-void aeMain(aeEventLoop *eventLoop, void* conn) {
+void aeMain(aeEventLoop *eventLoop, void *conn, void *arena) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
-        aeProcessEvents(eventLoop, conn, AE_ALL_EVENTS|
+        aeProcessEvents(eventLoop, conn, arena, AE_ALL_EVENTS|
                                    AE_CALL_BEFORE_SLEEP|
                                    AE_CALL_AFTER_SLEEP);
     }

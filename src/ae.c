@@ -428,12 +428,13 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
         const void* keys;  // VariableList_CFString**
         const void* key;   // CFString*
         const void* vals;  // VariableList_CFByte**
+        void* sga;         // ArenaOrderedSga*
         ReceivedPkt *pkt;
         uint16_t msg_type, size;
         uint32_t msg_id;
         const unsigned char* key_buffer;
         const unsigned char* val_buffer;
-        size_t keys_len, buffer_len;
+        size_t keys_len, buffer_len, num_entries;
         for (j = 0; j < n; j++) {
             // Read first four bytes of packet to determine message type.
             pkt = &pkts[j];
@@ -472,9 +473,22 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
                     // Currently, uses the key as the value.
                     // So many memory leaks in this code...
                     printf("key = %.*s\n", (int)buffer_len, key_buffer);
-                    CFBytes_new(key_buffer, buffer_len, &val_buffer);
+                    CFBytes_new(key_buffer, buffer_len, conn, &val_buffer);
                     VariableList_CFBytes_append(vals, val_buffer);
                 }
+
+                // Allocate and serialize the ArenaOrderedRcSga
+                GetMResp_num_scatter_gather_entries(res, &num_entries);
+                printf("num_scatter_gather_entries = %ld\n", num_entries);
+                ArenaOrderedRcSga_allocate(num_entries, arena, &sga);
+                if (GetMResp_serialize_into_arena_sga(res, sga, arena, conn,
+                        false) != 0) {  // with_copy = false
+                    printf("Error serializing GetMResp into ArenaSga\n");
+                    exit(1);
+                }
+
+                // Queue the ArenaOrderedRcSga
+                // TODO
             } else {
                 printf("unrecognized message type for kv store app.\n");
                 exit(1);

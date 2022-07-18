@@ -487,8 +487,12 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
                     exit(1);
                 }
 
-                // Queue the ArenaOrderedRcSga
-                // TODO
+                // Queue the ArenaOrderedRcSga (consumes sga)
+                if (Mlx5Connection_queue_arena_ordered_rcsga(
+                        conn, pkt->msg_id, pkt->conn_id, sga, j == n-1) != 0) {
+                    printf("Error queueing ArenaOrderedRcSga\n");
+                    exit(1);
+                }
             } else {
                 printf("unrecognized message type for kv store app.\n");
                 exit(1);

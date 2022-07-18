@@ -2597,12 +2597,26 @@ void initServer(void) {
     } else {
         serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
+    Mlx5Connection_set_copying_threshold(server.conn, 256);
+    Mlx5Connection_set_inline_mode(server.conn, 0);
+
+    size_t buf_size = 256;
+    const size_t max_size = 16384;
+    const size_t min_elts = 8192;
+    while(1) {
+        serverLog(LL_NOTICE, "Adding TX memory pool of size %ld.", buf_size);
+        Mlx5Connection_add_tx_mempool(server.conn, buf_size, min_elts);
+        buf_size *= 2;
+        if (buf_size > max_size) {
+            break;
+        }
+    }
 
     /* Initialize the bumpalo arena. */
     Bump_with_capacity(
         32,   // batch_size
         9216, // max_packet_size (jumbo frames turned on)
-        32,   // max_entries
+        64,   // max_entries
         &server.arena
     );
 

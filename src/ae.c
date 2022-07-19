@@ -427,7 +427,11 @@ void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
  * if flags has AE_CALL_BEFORE_SLEEP set, the beforesleep callback is called.
  *
  * The function returns the number of events processed. */
-int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
+int aeProcessEvents(aeEventLoop *eventLoop,
+                    void *conn,
+                    void *arena,
+                    redisDb *db,
+                    int flags)
 {
     int processed = 0, numevents;
     size_t n = 0;
@@ -589,10 +593,10 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-void aeMain(aeEventLoop *eventLoop, void *conn, void *arena) {
+void aeMain(aeEventLoop *eventLoop, void *conn, void *arena, redisDb *db) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
-        aeProcessEvents(eventLoop, conn, arena, AE_ALL_EVENTS|
+        aeProcessEvents(eventLoop, conn, arena, db, AE_ALL_EVENTS|
                                    AE_CALL_BEFORE_SLEEP|
                                    AE_CALL_AFTER_SLEEP);
     }

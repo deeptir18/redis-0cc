@@ -7060,7 +7060,7 @@ int main(int argc, char **argv) {
     redisSetCpuAffinity(server.server_cpulist);
     setOOMScoreAdj(-1);
 
-    aeMain(server.el, server.conn, server.arena);
+    aeMain(server.el, server.conn, server.arena, server.db);
     aeDeleteEventLoop(server.el);
     return 0;
 }

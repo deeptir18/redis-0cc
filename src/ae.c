@@ -415,6 +415,63 @@ void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
     }
 }
 
+/* Pop and handle packets from the Cornflakes datapath. Returns the number of
+ * processed packets */
+int cornflakesProcessEvents(void *conn, void *arena) {
+    int processed = 0;
+    size_t n = 0, j;
+
+    if (conn == NULL) {
+        printf("Expected conn != NULL, called from redis-benchmark.c?\n");
+        exit(1);
+    }
+
+    struct ReceivedPkt* pkts = Mlx5Connection_pop(conn, &n);
+    if (n == 0)
+        goto done;
+
+    // TODO(redis): Create a new client for each packet. Populate querybuf
+    // and other client fields based on the incoming data. Call
+    // processInputBuffer, which will parse argc and argv and command.
+    // TODO(cornflakes): Create a new client for each packet. Store a
+    // pointer to a deserialized GetMReq object.
+
+    ReceivedPkt *pkt;
+    // struct client *c = createClient(NULL);
+    uint16_t msg_type, size;
+    for (j = 0; j < n; j++) {
+        // TODO: Determine command type.
+        // TODO(redis): Call mgetCommand to populate the outgoing buffer.
+        // TODO(cornflakes): Call our own function to populate a pointer to
+        // a GetMResp.
+
+        // When ready to send...
+        // TODO(redis): Call queue_single_buffer_with_copy to send data.
+        // TODO(cornflakes): Call queue_arena_ordered_rc_sga.
+
+        // Read first four bytes of packet to determine message type.
+        pkt = &pkts[j];
+        msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
+        size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+        if (msg_type == 2) {
+            handleGetM(pkt, size, conn, arena, j == n-1);
+        } else {
+            printf("unrecognized message type for kv store app.\n");
+            exit(1);
+        }
+        Bump_reset(arena);
+    }
+
+done:
+    return processed;
+}
+
+void cornflakesMain(aeEventLoop *eventLoop, void *conn, void *arena) {
+    eventLoop->stop = 0;
+    while (!eventLoop->stop)
+        cornflakesProcessEvents(conn, arena);
+}
+
 /* Process every pending time event, then every pending file event
  * (that may be registered by time event callbacks just processed).
  * Without special flags the function sleeps until some file event
@@ -430,15 +487,9 @@ void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
  * if flags has AE_CALL_BEFORE_SLEEP set, the beforesleep callback is called.
  *
  * The function returns the number of events processed. */
-int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
+int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
-    size_t n = 0;
-
-    if (conn == NULL) {
-        printf("Expected conn != NULL, called from redis-benchmark.c?\n");
-        exit(1);
-    }
 
     /* Nothing to do? return ASAP */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
@@ -483,11 +534,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
 
         /* Call the multiplexing API, will return only on timeout or when
          * some event fires. */
-        // numevents = aeApiPoll(eventLoop, tvp);
-        struct ReceivedPkt* pkts = Mlx5Connection_pop(conn, &n);
-        if (n > 0) {
-            // printf("Received %ld packets\n", n);
-        }
+        numevents = aeApiPoll(eventLoop, tvp);
 
         /* After sleep callback. */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
@@ -495,20 +542,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
 
         ReceivedPkt *pkt;
         uint16_t msg_type, size;
-        for (j = 0; j < n; j++) {
-            // Read first four bytes of packet to determine message type.
-            pkt = &pkts[j];
-            msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
-            size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
-            if (msg_type == 2) {
-                handleGetM(pkt, size, conn, arena, j == n-1);
-            } else {
-                printf("unrecognized message type for kv store app.\n");
-                exit(1);
-            }
-            Bump_reset(arena);
-
-            /*
+        for (j = 0; j < numevents; j++) {
             int fd = eventLoop->fired[j].fd;
             aeFileEvent *fe = &eventLoop->events[fd];
             int mask = eventLoop->fired[j].mask;
@@ -560,9 +594,10 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
             }
 
             processed++;
-            */
         }
     }
+
+done:
     /* Check time events */
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
@@ -592,10 +627,10 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-void aeMain(aeEventLoop *eventLoop, void *conn, void *arena) {
+void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
-        aeProcessEvents(eventLoop, conn, arena, AE_ALL_EVENTS|
+        aeProcessEvents(eventLoop, AE_ALL_EVENTS|
                                    AE_CALL_BEFORE_SLEEP|
                                    AE_CALL_AFTER_SLEEP);
     }

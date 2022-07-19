@@ -4000,10 +4000,7 @@ void processEventsWhileBlocked(void) {
     ProcessingEventsWhileBlocked++;
     while (iterations--) {
         long long startval = server.events_processed_while_blocked;
-        long long ae_events = aeProcessEvents(server.el, server.conn,
-            server.arena,
-            AE_FILE_EVENTS|AE_DONT_WAIT|
-            AE_CALL_BEFORE_SLEEP|AE_CALL_AFTER_SLEEP);
+        long long ae_events = cornflakesProcessEvents(server.conn, server.arena);
         /* Note that server.events_processed_while_blocked will also get
          * incremented by callbacks called by the event loop handlers. */
         server.events_processed_while_blocked += ae_events;

@@ -3589,4 +3589,8 @@ int iAmMaster(void);
 #define STRINGIFY_(x) #x
 #define STRINGIFY(x) STRINGIFY_(x)
 
+/* Cornflakes */
+int cornflakesProcessEvents(void* conn, void *arena);
+void cornflakesMain(aeEventLoop *eventLoop, void *conn, void *arena);
+
 #endif

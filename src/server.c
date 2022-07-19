@@ -7065,4 +7065,131 @@ int main(int argc, char **argv) {
     return 0;
 }
 
+void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
+                int end_batch) {
+    void* req;         // GetMReq*
+    void* res;         // GetMResp*
+    const void* keys;  // VariableList_CFString**
+    const void* key;   // CFString*
+    const void* vals;  // VariableList_CFByte**
+    void* sga;         // ArenaOrderedSga*
+    uint32_t msg_id;
+    const unsigned char* key_buffer;
+    const unsigned char* val_buffer;
+    size_t i, keys_len, buffer_len, num_entries;
+
+    // printf("handling GetM(%d)\n", size);
+    // Deserialize the request
+    GetMReq_new(&req);
+    if (GetMReq_deserialize_from_buf(req,
+                                     pkt->data + 4,
+                                     pkt->data_len - 4) != 0) {
+        printf("Error deserializing GetReq\n");
+        return;
+    }
+
+    // Initialize the response object
+    GetMResp_new(&res);
+    GetMReq_get_id(req, &msg_id);
+    GetMResp_set_id(res, msg_id);
+    // printf("msg_id = %d\n", msg_id);
+
+    // Initialize the response values based on the request keys
+    GetMReq_get_keys(req, &keys);
+    VariableList_CFString_len(keys, &keys_len);
+    GetMResp_init_vals(res, keys_len);
+    GetMResp_get_mut_vals(res, &vals);
+
+    // Populate the response by quering the request keys
+    assert(size == keys_len);
+    for (i = 0; i < keys_len; i++) {
+        VariableList_CFString_index(keys, i, &key);
+        CFString_unpack(key, &key_buffer, &buffer_len);
+
+        // TODO: do something with the key
+        // Currently, uses the key as the value.
+        // So many memory leaks in this code...
+        printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        // robj *k = createStringObject((const char*)key_buffer, buffer_len);
+        // robj *o = lookupKeyRead(db, k);
+        // CFBytes_new(o->ptr, sdslen(o->ptr), conn, &val_buffer);
+        CFBytes_new(key_buffer, buffer_len, conn, &val_buffer);
+        VariableList_CFBytes_append(vals, val_buffer);
+    }
+
+    // Allocate and serialize the ArenaOrderedRcSga
+    GetMResp_num_scatter_gather_entries(res, &num_entries);
+    // printf("num_scatter_gather_entries = %ld\n", num_entries);
+    ArenaOrderedRcSga_allocate(num_entries, arena, &sga);
+    if (GetMResp_serialize_into_arena_sga(res, sga, arena, conn,
+            false) != 0) {  // with_copy = false
+        printf("Error serializing GetMResp into ArenaSga\n");
+        exit(1);
+    }
+
+    // Queue the ArenaOrderedRcSga (consumes sga)
+    if (Mlx5Connection_queue_arena_ordered_rcsga(
+            conn, pkt->msg_id, pkt->conn_id, sga, end_batch) != 0) {
+        printf("Error queueing ArenaOrderedRcSga\n");
+        exit(1);
+    }
+}
+
+/* Pop and handle packets from the Cornflakes datapath. Returns the number of
+ * processed packets */
+int cornflakesProcessEvents(void *conn, void *arena) {
+    int processed = 0;
+    size_t n = 0, j;
+
+    if (conn == NULL) {
+        printf("Expected conn != NULL, called from redis-benchmark.c?\n");
+        exit(1);
+    }
+
+    struct ReceivedPkt* pkts = Mlx5Connection_pop(conn, &n);
+    if (n == 0)
+        goto done;
+
+    // TODO(redis): Create a new client for each packet. Populate querybuf
+    // and other client fields based on the incoming data. Call
+    // processInputBuffer, which will parse argc and argv and command.
+    // TODO(cornflakes): Create a new client for each packet. Store a
+    // pointer to a deserialized GetMReq object.
+
+    ReceivedPkt *pkt;
+    // struct client *c = createClient(NULL);
+    uint16_t msg_type, size;
+    for (j = 0; j < n; j++) {
+        // TODO: Determine command type.
+        // TODO(redis): Call mgetCommand to populate the outgoing buffer.
+        // TODO(cornflakes): Call our own function to populate a pointer to
+        // a GetMResp.
+
+        // When ready to send...
+        // TODO(redis): Call queue_single_buffer_with_copy to send data.
+        // TODO(cornflakes): Call queue_arena_ordered_rc_sga.
+
+        // Read first four bytes of packet to determine message type.
+        pkt = &pkts[j];
+        msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
+        size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+        if (msg_type == 2) {
+            handleGetM(pkt, size, conn, arena, j == n-1);
+        } else {
+            printf("unrecognized message type for kv store app.\n");
+            exit(1);
+        }
+        Bump_reset(arena);
+    }
+
+done:
+    return processed;
+}
+
+void cornflakesMain(aeEventLoop *eventLoop, void *conn, void *arena) {
+    eventLoop->stop = 0;
+    while (!eventLoop->stop)
+        cornflakesProcessEvents(conn, arena);
+}
+
 /* The End */

@@ -141,8 +141,4 @@ int aeGetSetSize(aeEventLoop *eventLoop);
 int aeResizeSetSize(aeEventLoop *eventLoop, int setsize);
 void aeSetDontWait(aeEventLoop *eventLoop, int noWait);
 
-/* Cornflakes */
-int cornflakesProcessEvents(void* conn, void *arena);
-void cornflakesMain(aeEventLoop *eventLoop, void *conn, void *arena);
-
 #endif

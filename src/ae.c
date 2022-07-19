@@ -345,6 +345,73 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
     return processed;
 }
 
+void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
+                int end_batch) {
+    void* req;         // GetMReq*
+    void* res;         // GetMResp*
+    const void* keys;  // VariableList_CFString**
+    const void* key;   // CFString*
+    const void* vals;  // VariableList_CFByte**
+    void* sga;         // ArenaOrderedSga*
+    uint32_t msg_id;
+    const unsigned char* key_buffer;
+    const unsigned char* val_buffer;
+    size_t i, keys_len, buffer_len, num_entries;
+
+    // printf("handling GetM(%d)\n", size);
+    // Deserialize the request
+    GetMReq_new(&req);
+    if (GetMReq_deserialize_from_buf(req,
+                                     pkt->data + 4,
+                                     pkt->data_len - 4) != 0) {
+        printf("Error deserializing GetReq\n");
+        return;
+    }
+
+    // Initialize the response object
+    GetMResp_new(&res);
+    GetMReq_get_id(req, &msg_id);
+    GetMResp_set_id(res, msg_id);
+    // printf("msg_id = %d\n", msg_id);
+
+    // Initialize the response values based on the request keys
+    GetMReq_get_keys(req, &keys);
+    VariableList_CFString_len(keys, &keys_len);
+    GetMResp_init_vals(res, keys_len);
+    GetMResp_get_mut_vals(res, &vals);
+
+    // Populate the response by quering the request keys
+    assert(size == keys_len);
+    for (i = 0; i < keys_len; i++) {
+        VariableList_CFString_index(keys, i, &key);
+        CFString_unpack(key, &key_buffer, &buffer_len);
+
+        // TODO: do something with the key
+        // Currently, uses the key as the value.
+        // So many memory leaks in this code...
+        printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        CFBytes_new(key_buffer, buffer_len, conn, &val_buffer);
+        VariableList_CFBytes_append(vals, val_buffer);
+    }
+
+    // Allocate and serialize the ArenaOrderedRcSga
+    GetMResp_num_scatter_gather_entries(res, &num_entries);
+    // printf("num_scatter_gather_entries = %ld\n", num_entries);
+    ArenaOrderedRcSga_allocate(num_entries, arena, &sga);
+    if (GetMResp_serialize_into_arena_sga(res, sga, arena, conn,
+            false) != 0) {  // with_copy = false
+        printf("Error serializing GetMResp into ArenaSga\n");
+        exit(1);
+    }
+
+    // Queue the ArenaOrderedRcSga (consumes sga)
+    if (Mlx5Connection_queue_arena_ordered_rcsga(
+            conn, pkt->msg_id, pkt->conn_id, sga, end_batch) != 0) {
+        printf("Error queueing ArenaOrderedRcSga\n");
+        exit(1);
+    }
+}
+
 /* Process every pending time event, then every pending file event
  * (that may be registered by time event callbacks just processed).
  * Without special flags the function sleeps until some file event
@@ -379,7 +446,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
      * to fire. */
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
-        size_t j, i;
+        size_t j;
         struct timeval tv, *tvp;
         int64_t usUntilTimer = -1;
 
@@ -416,83 +483,22 @@ int aeProcessEvents(aeEventLoop *eventLoop, void *conn, void *arena, int flags)
         // numevents = aeApiPoll(eventLoop, tvp);
         struct ReceivedPkt* pkts = Mlx5Connection_pop(conn, &n);
         if (n > 0) {
-            printf("Received %ld packets\n", n);
+            // printf("Received %ld packets\n", n);
         }
 
         /* After sleep callback. */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
 
-        void* req;         // GetMReq*
-        void* res;         // GetMResp*
-        const void* keys;  // VariableList_CFString**
-        const void* key;   // CFString*
-        const void* vals;  // VariableList_CFByte**
-        void* sga;         // ArenaOrderedSga*
         ReceivedPkt *pkt;
         uint16_t msg_type, size;
-        uint32_t msg_id;
-        const unsigned char* key_buffer;
-        const unsigned char* val_buffer;
-        size_t keys_len, buffer_len, num_entries;
         for (j = 0; j < n; j++) {
             // Read first four bytes of packet to determine message type.
             pkt = &pkts[j];
             msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
             size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
-            if (msg_type == 2) {  // GetM
-                printf("handling GetM(%d)\n", size);
-                // Deserialize the request
-                GetMReq_new(&req);
-                if (GetMReq_deserialize_from_buf(req,
-                                                 pkt->data + 4,
-                                                 pkt->data_len - 4) != 0) {
-                    printf("Error deserializing GetReq\n");
-                    continue;
-                }
-
-                // Initialize the response object
-                GetMResp_new(&res);
-                GetMReq_get_id(req, &msg_id);
-                GetMResp_set_id(res, msg_id);
-                printf("msg_id = %d\n", msg_id);
-
-                // Initialize the response values based on the request keys
-                GetMReq_get_keys(req, &keys);
-                VariableList_CFString_len(keys, &keys_len);
-                GetMResp_init_vals(res, keys_len);
-                GetMResp_get_mut_vals(res, &vals);
-
-                // Populate the response by quering the request keys
-                assert(size == keys_len);
-                for (i = 0; i < keys_len; i++) {
-                    VariableList_CFString_index(keys, i, &key);
-                    CFString_unpack(key, &key_buffer, &buffer_len);
-
-                    // TODO: do something with the key
-                    // Currently, uses the key as the value.
-                    // So many memory leaks in this code...
-                    printf("key = %.*s\n", (int)buffer_len, key_buffer);
-                    CFBytes_new(key_buffer, buffer_len, conn, &val_buffer);
-                    VariableList_CFBytes_append(vals, val_buffer);
-                }
-
-                // Allocate and serialize the ArenaOrderedRcSga
-                GetMResp_num_scatter_gather_entries(res, &num_entries);
-                printf("num_scatter_gather_entries = %ld\n", num_entries);
-                ArenaOrderedRcSga_allocate(num_entries, arena, &sga);
-                if (GetMResp_serialize_into_arena_sga(res, sga, arena, conn,
-                        false) != 0) {  // with_copy = false
-                    printf("Error serializing GetMResp into ArenaSga\n");
-                    exit(1);
-                }
-
-                // Queue the ArenaOrderedRcSga (consumes sga)
-                if (Mlx5Connection_queue_arena_ordered_rcsga(
-                        conn, pkt->msg_id, pkt->conn_id, sga, j == n-1) != 0) {
-                    printf("Error queueing ArenaOrderedRcSga\n");
-                    exit(1);
-                }
+            if (msg_type == 2) {
+                handleGetM(pkt, size, conn, arena, j == n-1);
             } else {
                 printf("unrecognized message type for kv store app.\n");
                 exit(1);

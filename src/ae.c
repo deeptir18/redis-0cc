@@ -390,6 +390,9 @@ void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
         // Currently, uses the key as the value.
         // So many memory leaks in this code...
         printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        // robj *k = createStringObject((const char*)key_buffer, buffer_len);
+        // robj *o = lookupKeyRead(db, k);
+        // CFBytes_new(o->ptr, sdslen(o->ptr), conn, &val_buffer);
         CFBytes_new(key_buffer, buffer_len, conn, &val_buffer);
         VariableList_CFBytes_append(vals, val_buffer);
     }

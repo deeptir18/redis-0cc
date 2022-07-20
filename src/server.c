@@ -7081,76 +7081,6 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
-                int end_batch) {
-    void* req;         // GetMReq*
-    void* res;         // GetMResp*
-    const void* keys;  // VariableList_CFString**
-    const void* key;   // CFString*
-    const void* vals;  // VariableList_CFByte**
-    void* sga;         // ArenaOrderedSga*
-    uint32_t msg_id;
-    const unsigned char* key_buffer;
-    const unsigned char* val_buffer;
-    size_t i, keys_len, buffer_len, num_entries;
-
-    // printf("handling GetM(%d)\n", size);
-    // Deserialize the request
-    GetMReq_new(&req);
-    if (GetMReq_deserialize_from_buf(req,
-                                     pkt->data + 4,
-                                     pkt->data_len - 4) != 0) {
-        printf("Error deserializing GetReq\n");
-        return;
-    }
-
-    // Initialize the response object
-    GetMResp_new(&res);
-    GetMReq_get_id(req, &msg_id);
-    GetMResp_set_id(res, msg_id);
-    // printf("msg_id = %d\n", msg_id);
-
-    // Initialize the response values based on the request keys
-    GetMReq_get_keys(req, &keys);
-    VariableList_CFString_len(keys, &keys_len);
-    GetMResp_init_vals(res, keys_len);
-    GetMResp_get_mut_vals(res, &vals);
-
-    // Populate the response by quering the request keys
-    assert(size == keys_len);
-    for (i = 0; i < keys_len; i++) {
-        VariableList_CFString_index(keys, i, &key);
-        CFString_unpack(key, &key_buffer, &buffer_len);
-
-        // TODO: do something with the key
-        // Currently, uses the key as the value.
-        // So many memory leaks in this code...
-        printf("key = %.*s\n", (int)buffer_len, key_buffer);
-        // robj *k = createStringObject((const char*)key_buffer, buffer_len);
-        // robj *o = lookupKeyRead(db, k);
-        // CFBytes_new(o->ptr, sdslen(o->ptr), conn, &val_buffer);
-        CFBytes_new(key_buffer, buffer_len, conn, &val_buffer);
-        VariableList_CFBytes_append(vals, val_buffer);
-    }
-
-    // Allocate and serialize the ArenaOrderedRcSga
-    GetMResp_num_scatter_gather_entries(res, &num_entries);
-    // printf("num_scatter_gather_entries = %ld\n", num_entries);
-    ArenaOrderedRcSga_allocate(num_entries, arena, &sga);
-    if (GetMResp_serialize_into_arena_sga(res, sga, arena, conn,
-            false) != 0) {  // with_copy = false
-        printf("Error serializing GetMResp into ArenaSga\n");
-        exit(1);
-    }
-
-    // Queue the ArenaOrderedRcSga (consumes sga)
-    if (Mlx5Connection_queue_arena_ordered_rcsga(
-            conn, pkt->msg_id, pkt->conn_id, sga, end_batch) != 0) {
-        printf("Error queueing ArenaOrderedRcSga\n");
-        exit(1);
-    }
-}
-
 int cornflakesProcessEventsRedis(struct redisServer *s,
                                  size_t n,
                                  struct ReceivedPkt* pkts) {
@@ -7214,34 +7144,65 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
     c->use_cornflakes = true;
-    // uint16_t msg_type, size;
+    c->datapath = s->datapath;
+    uint16_t msg_type, size;
     for (size_t j = 0; j < n; j++) {
         pkt = &pkts[j];
-        // // Read first four bytes of packet to determine message type.
-        // msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
-        // size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
-        // if (msg_type == 2) {
-        //     handleGetM(pkt, size, s->datapath, s->arena, j == n-1);
-        // } else {
-        //     printf("unrecognized message type for kv store app.\n");
-        //     exit(1);
-        // }
+
+        // Read first four bytes of packet to determine message type.
+        msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
+        size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+        assert(msg_type == 2);
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
 
-        // TODO(cornflakes): Store a pointer to a deserialized Req object.
+        uint32_t msg_id;
+        if (msg_type == 2) {
+            GetMReq_new(&c->cf_req);
+            if (GetMReq_deserialize_from_buf(c->cf_req,
+                                             pkt->data + 4,
+                                             pkt->data_len - 4) != 0) {
+                printf("Error deserializing GetMReq\n");
+                exit(1);
+            }
+
+            // Initialize the response object.
+            GetMResp_new(&c->cf_res);
+            GetMReq_get_id(c->cf_req, &msg_id);
+            GetMResp_set_id(c->cf_res, msg_id);
+        }
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
 
-        // TODO(cornflakes): Determine the command type via the cornflakes
-        // header and construct a Resp object.
+        void *sga;
+        size_t num_entries;
+        if (msg_type == 2) {
+            c->cmd = dictFetchValue(s->commands,
+                createObject(OBJ_STRING,sdsnew("MGET"))->ptr);
+            c->cmd->proc(c);
+            GetMResp_num_scatter_gather_entries(c->cf_res, &num_entries);
+            ArenaOrderedRcSga_allocate(num_entries, s->arena, &sga);
+            if (GetMResp_serialize_into_arena_sga(c->cf_res, sga, s->arena,
+                    s->datapath, false) != 0) {  // with_copy = false
+                printf("Error serializing GetMResp into ArenaSga\n");
+                exit(1);
+            }
+        }
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 3: Serialize and send the response.
 
-        // Bump_reset(s->arena);
+        // When ready to send...
+        // Queue the ArenaOrderedRcSga (consumes sga)
+        if (Mlx5Connection_queue_arena_ordered_rcsga(s->datapath, pkt->msg_id,
+                pkt->conn_id, sga, j == n-1) != 0) {
+            printf("Error queueing ArenaOrderedRcSga\n");
+            exit(1);
+        }
+
+        Bump_reset(s->arena);
         processed++;
     }
     freeClient(c);

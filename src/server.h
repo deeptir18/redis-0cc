@@ -1087,6 +1087,8 @@ typedef struct client {
     /* Cornflakes */
     int use_cornflakes;         /* Whether to use Cornflakes serialization */
     void *datapath;             /* MLX5 connection */
+    void *cf_req;               /* Cornflakes request object */
+    void *cf_res;               /* Cornflakes response object */
 
     uint64_t id;            /* Client incremental unique ID. */
     uint64_t flags;         /* Client flags: CLIENT_* macros. */

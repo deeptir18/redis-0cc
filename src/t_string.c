@@ -28,6 +28,7 @@
  */
 
 #include "server.h"
+#include "kv_sga_cornflakes.h"
 #include <math.h> /* isnan(), isinf() */
 
 /* Forward declarations */
@@ -554,8 +555,34 @@ void mgetCommandRedis(client *c) {
 }
 
 void mgetCommandCf(client *c) {
-    // TODO
-    exit(1);
+    const void* keys;  // VariableList_CFString**
+    const void* vals;  // VariableList_CFByte**
+    const void* key;   // CFString*
+    const unsigned char* key_buffer;
+    const unsigned char* val_buffer;
+    size_t i, keys_len, buffer_len;
+
+    // Initialize the response values based on the request keys
+    GetMReq_get_keys(c->cf_req, &keys);
+    VariableList_CFString_len(keys, &keys_len);
+    GetMResp_init_vals(c->cf_res, keys_len);
+    GetMResp_get_mut_vals(c->cf_res, &vals);
+
+    // Populate the response by querying the request keys
+    for (i = 0; i < keys_len; i++) {
+        VariableList_CFString_index(keys, i, &key);
+        CFString_unpack(key, &key_buffer, &buffer_len);
+
+        // TODO: do something with the key
+        // Currently, uses the key as the value.
+        // So many memory leaks in this code...
+        printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        // robj *k = createStringObject((const char*)key_buffer, buffer_len);
+        // robj *o = lookupKeyRead(db, k);
+        // CFBytes_new(o->ptr, sdslen(o->ptr), c->datapath, &val_buffer);
+        CFBytes_new(key_buffer, buffer_len, c->datapath, &val_buffer);
+        VariableList_CFBytes_append(vals, val_buffer);
+    }
 }
 
 void mgetCommand(client *c) {

@@ -2620,7 +2620,7 @@ void initServer(void) {
     if (serialization == NULL) {
         printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
         exit(1);
-    } else if (strcmp(serialization, "cornflakes")) {
+    } else if (strcmp(serialization, "cornflakes") == 0) {
         server.use_cornflakes = true;
         Bump_with_capacity(
             32,   // batch_size
@@ -2628,7 +2628,7 @@ void initServer(void) {
             64,   // max_entries
             &server.arena
         );
-    } else if (strcmp(serialization, "redis")) {
+    } else if (strcmp(serialization, "redis") == 0) {
         server.use_cornflakes = false;
         server.arena = NULL;
     } else {
@@ -7151,41 +7151,18 @@ void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
     }
 }
 
-/* Pop and handle packets from the Cornflakes datapath. Returns the number of
- * processed packets */
-int cornflakesProcessEvents(struct redisServer *s) {
+int cornflakesProcessEventsRedis(struct redisServer *s,
+                                 size_t n,
+                                 struct ReceivedPkt* pkts) {
     int processed = 0;
-    size_t n = 0, j;
-
-    if (s->conn == NULL) {
-        printf("Expected conn != NULL, called from redis-benchmark.c?\n");
-        exit(1);
-    }
-
-    struct ReceivedPkt* pkts = Mlx5Connection_pop(s->conn, &n);
-    if (n == 0)
-        goto done;
-
     ReceivedPkt *pkt;
     // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
-    // uint16_t msg_type, size;
-    for (j = 0; j < n; j++) {
+    for (size_t j = 0; j < n; j++) {
         pkt = &pkts[j];
-        // // Read first four bytes of packet to determine message type.
-        // msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
-        // size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
-        // if (msg_type == 2) {
-        //     handleGetM(pkt, size, s->conn, s->arena, j == n-1);
-        // } else {
-        //     printf("unrecognized message type for kv store app.\n");
-        //     exit(1);
-        // }
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
-
-        // TODO(cornflakes): Store a pointer to a deserialized Req object.
 
         // Similar to readQueryFromClient() in networking.c
         // Populates querybuf and other client fields based on incoming data.
@@ -7204,32 +7181,87 @@ int cornflakesProcessEvents(struct redisServer *s) {
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
 
-        // TODO(cornflakes): Determine the command type via the cornflakes
-        // header and construct a Resp object.
-
         // Skip the ACL checks in processCommand() and populate the response
         // buffer by executing the command. The command eventually populates
         // a static buffer c->buf with length c->bufpos via _addReplyToBuffer().
-        c->cmd = lookupCommand(c->argv,c->argc);
+        c->cmd = dictFetchValue(s->commands, c->argv[0]->ptr);
         c->cmd->proc(c);
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 3: Serialize and send the response.
 
         // When ready to send...
-        // TODO(cornflakes): Call queue_arena_ordered_rc_sga.
         if (Mlx5Connection_queue_single_buffer_with_copy(s->conn, pkt->msg_id,
                 pkt->conn_id, (uint8_t*)c->buf, c->bufpos, j == n-1) != 0) {
             printf("Error queueing single buffer\n");
             exit(1);
         }
 
-        // Bump_reset(s->arena);
+        processed++;
     }
     freeClient(c);
 
-done:
     return processed;
+}
+
+int cornflakesProcessEventsCf(struct redisServer *s,
+                              size_t n,
+                              struct ReceivedPkt* pkts) {
+    int processed = 0;
+    ReceivedPkt *pkt;
+    // TODO: does this work if n>1?
+    struct client *c = createClient(NULL);
+    // uint16_t msg_type, size;
+    for (size_t j = 0; j < n; j++) {
+        pkt = &pkts[j];
+        // // Read first four bytes of packet to determine message type.
+        // msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
+        // size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+        // if (msg_type == 2) {
+        //     handleGetM(pkt, size, s->conn, s->arena, j == n-1);
+        // } else {
+        //     printf("unrecognized message type for kv store app.\n");
+        //     exit(1);
+        // }
+
+        ////////////////////////////////////////////////////////////////////////
+        // STEP 1: Deserialize the incoming request.
+
+        // TODO(cornflakes): Store a pointer to a deserialized Req object.
+
+        ////////////////////////////////////////////////////////////////////////
+        // STEP 2: Process the request and populate the outgoing buffer.
+
+        // TODO(cornflakes): Determine the command type via the cornflakes
+        // header and construct a Resp object.
+
+        ////////////////////////////////////////////////////////////////////////
+        // STEP 3: Serialize and send the response.
+
+        // Bump_reset(s->arena);
+        processed++;
+    }
+    freeClient(c);
+
+    return processed;
+}
+
+/* Pop and handle packets from the Cornflakes datapath. Returns the number of
+ * processed packets */
+int cornflakesProcessEvents(struct redisServer *s) {
+    if (s->conn == NULL) {
+        printf("Expected conn != NULL\n");
+        exit(1);
+    }
+
+    size_t n = 0;
+    struct ReceivedPkt* pkts = Mlx5Connection_pop(s->conn, &n);
+    if (n == 0) return 0;
+
+    if (s->use_cornflakes)
+        return cornflakesProcessEventsCf(s, n, pkts);
+    else
+        return cornflakesProcessEventsRedis(s, n, pkts);
 }
 
 void cornflakesMain(struct redisServer *s) {

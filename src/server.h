@@ -1084,6 +1084,10 @@ typedef struct {
 } clientMemUsageBucket;
 
 typedef struct client {
+    /* Cornflakes */
+    int use_cornflakes;         /* Whether to use Cornflakes serialization */
+    void *datapath;             /* MLX5 connection */
+
     uint64_t id;            /* Client incremental unique ID. */
     uint64_t flags;         /* Client flags: CLIENT_* macros. */
     connection *conn;
@@ -1451,7 +1455,7 @@ typedef enum childInfoType {
 struct redisServer {
     /* Cornflakes */
     int use_cornflakes;         /* Whether to use Cornflakes serialization */
-    void *conn;                 /* MLX5 connection */
+    void *datapath;             /* MLX5 connection */
     void *arena;                /* bumpalo::Bump */
 
     /* General */

@@ -2592,22 +2592,22 @@ void initServer(void) {
     /* Initialize the MLX5 connection. */
     const char *cf_config = getenv("CONFIG_PATH");
     assert(cf_config != NULL);
-    server.conn = Mlx5Connection_new(cf_config, "192.168.1.1");
-    if (server.conn == NULL) {
+    server.datapath = Mlx5Connection_new(cf_config, "192.168.1.1");
+    if (server.datapath == NULL) {
         serverLog(LL_WARNING, "Failed to initialize MLX5 connection.");
         exit(1);
     } else {
         serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
-    Mlx5Connection_set_copying_threshold(server.conn, 256);
-    Mlx5Connection_set_inline_mode(server.conn, 0);
+    Mlx5Connection_set_copying_threshold(server.datapath, 256);
+    Mlx5Connection_set_inline_mode(server.datapath, 0);
 
     size_t buf_size = 256;
     const size_t max_size = 16384;
     const size_t min_elts = 8192;
     while(1) {
         serverLog(LL_NOTICE, "Adding TX memory pool of size %ld.", buf_size);
-        Mlx5Connection_add_tx_mempool(server.conn, buf_size, min_elts);
+        Mlx5Connection_add_tx_mempool(server.datapath, buf_size, min_elts);
         buf_size *= 2;
         if (buf_size > max_size) {
             break;
@@ -7191,8 +7191,9 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         // STEP 3: Serialize and send the response.
 
         // When ready to send...
-        if (Mlx5Connection_queue_single_buffer_with_copy(s->conn, pkt->msg_id,
-                pkt->conn_id, (uint8_t*)c->buf, c->bufpos, j == n-1) != 0) {
+        if (Mlx5Connection_queue_single_buffer_with_copy(s->datapath,
+                pkt->msg_id, pkt->conn_id, (uint8_t*)c->buf, c->bufpos,
+                j == n-1) != 0) {
             printf("Error queueing single buffer\n");
             exit(1);
         }
@@ -7218,7 +7219,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         // msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
         // size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
         // if (msg_type == 2) {
-        //     handleGetM(pkt, size, s->conn, s->arena, j == n-1);
+        //     handleGetM(pkt, size, s->datapath, s->arena, j == n-1);
         // } else {
         //     printf("unrecognized message type for kv store app.\n");
         //     exit(1);
@@ -7249,13 +7250,13 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 /* Pop and handle packets from the Cornflakes datapath. Returns the number of
  * processed packets */
 int cornflakesProcessEvents(struct redisServer *s) {
-    if (s->conn == NULL) {
-        printf("Expected conn != NULL\n");
+    if (s->datapath == NULL) {
+        printf("Expected datapath != NULL\n");
         exit(1);
     }
 
     size_t n = 0;
-    struct ReceivedPkt* pkts = Mlx5Connection_pop(s->conn, &n);
+    struct ReceivedPkt* pkts = Mlx5Connection_pop(s->datapath, &n);
     if (n == 0) return 0;
 
     if (s->use_cornflakes)

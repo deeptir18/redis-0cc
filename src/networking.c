@@ -287,34 +287,7 @@ void putClientInPendingWriteQueue(client *c) {
  * data to the clients output buffers. If the function returns C_ERR no
  * data should be appended to the output buffers. */
 int prepareClientToWrite(client *c) {
-    /* If it's the Lua client we always return ok without installing any
-     * handler since there is no socket at all. */
-    if (c->flags & (CLIENT_SCRIPT|CLIENT_MODULE)) return C_OK;
-
-    /* If CLIENT_CLOSE_ASAP flag is set, we need not write anything. */
-    if (c->flags & CLIENT_CLOSE_ASAP) return C_ERR;
-
-    /* CLIENT REPLY OFF / SKIP handling: don't send replies. */
-    if (c->flags & (CLIENT_REPLY_OFF|CLIENT_REPLY_SKIP)) return C_ERR;
-
-    /* Masters don't receive replies, unless CLIENT_MASTER_FORCE_REPLY flag
-     * is set. */
-    if ((c->flags & CLIENT_MASTER) &&
-        !(c->flags & CLIENT_MASTER_FORCE_REPLY)) return C_ERR;
-
-    if (!c->conn) return C_ERR; /* Fake client for AOF loading. */
-
-    /* Schedule the client to write the output buffers to the socket, unless
-     * it should already be setup to do so (it has already pending data).
-     *
-     * If CLIENT_PENDING_READ is set, we're in an IO thread and should
-     * not put the client in pending write queue. Instead, it will be
-     * done by handleClientsWithPendingReadsUsingThreads() upon return.
-     */
-    if (!clientHasPendingReplies(c) && io_threads_op == IO_THREADS_OP_IDLE)
-        putClientInPendingWriteQueue(c);
-
-    /* Authorize the caller to queue in the output buffer of this client. */
+    // NOTE(ygina): let's just say we can always write.
     return C_OK;
 }
 

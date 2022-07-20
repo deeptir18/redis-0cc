@@ -7150,37 +7150,67 @@ int cornflakesProcessEvents(struct redisServer *s) {
     if (n == 0)
         goto done;
 
-    // TODO(redis): Create a new client for each packet. Populate querybuf
-    // and other client fields based on the incoming data. Call
-    // processInputBuffer, which will parse argc and argv and command.
-    // TODO(cornflakes): Create a new client for each packet. Store a
-    // pointer to a deserialized GetMReq object.
-
     ReceivedPkt *pkt;
-    // struct client *c = createClient(NULL);
-    uint16_t msg_type, size;
+    // TODO: does this work if n>1?
+    struct client *c = createClient(NULL);
+    // uint16_t msg_type, size;
     for (j = 0; j < n; j++) {
-        // TODO: Determine command type.
-        // TODO(redis): Call mgetCommand to populate the outgoing buffer.
-        // TODO(cornflakes): Call our own function to populate a pointer to
-        // a GetMResp.
-
-        // When ready to send...
-        // TODO(redis): Call queue_single_buffer_with_copy to send data.
-        // TODO(cornflakes): Call queue_arena_ordered_rc_sga.
-
-        // Read first four bytes of packet to determine message type.
         pkt = &pkts[j];
-        msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
-        size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
-        if (msg_type == 2) {
-            handleGetM(pkt, size, s->conn, s->arena, j == n-1);
-        } else {
-            printf("unrecognized message type for kv store app.\n");
+        // // Read first four bytes of packet to determine message type.
+        // msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
+        // size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+        // if (msg_type == 2) {
+        //     handleGetM(pkt, size, s->conn, s->arena, j == n-1);
+        // } else {
+        //     printf("unrecognized message type for kv store app.\n");
+        //     exit(1);
+        // }
+
+        ////////////////////////////////////////////////////////////////////////
+        // STEP 1: Deserialize the incoming request.
+
+        // TODO(cornflakes): Store a pointer to a deserialized Req object.
+
+        // Similar to readQueryFromClient() in networking.c
+        // Populates querybuf and other client fields based on incoming data.
+        c->reqtype = PROTO_REQ_MULTIBULK;
+        // TODO: Remove Cornflakes header on the client side when using Redis
+        // serialization.
+        c->querybuf = sdsnewlen(pkt->data + 4, pkt->data_len - 4);
+        c->querybuf_peak = max(c->querybuf_peak, sdslen(c->querybuf));
+
+        // Parse argc and argv from the multibulk buffer.
+        if (processMultibulkBuffer(c) != C_OK) {
+            printf("Error processing multibulk buffer\n");
             exit(1);
         }
-        Bump_reset(s->arena);
+
+        ////////////////////////////////////////////////////////////////////////
+        // STEP 2: Process the request and populate the outgoing buffer.
+
+        // TODO(cornflakes): Determine the command type via the cornflakes
+        // header and construct a Resp object.
+
+        // Skip the ACL checks in processCommand() and populate the response
+        // buffer by executing the command. The command eventually populates
+        // a static buffer c->buf with length c->bufpos via _addReplyToBuffer().
+        c->cmd = lookupCommand(c->argv,c->argc);
+        c->cmd->proc(c);
+
+        ////////////////////////////////////////////////////////////////////////
+        // STEP 3: Serialize and send the response.
+
+        // When ready to send...
+        // TODO(cornflakes): Call queue_arena_ordered_rc_sga.
+        if (Mlx5Connection_queue_single_buffer_with_copy(s->conn, pkt->msg_id,
+                pkt->conn_id, (uint8_t*)c->buf, c->bufpos, j == n-1) != 0) {
+            printf("Error queueing single buffer\n");
+            exit(1);
+        }
+
+        // Bump_reset(s->arena);
     }
+    freeClient(c);
 
 done:
     return processed;

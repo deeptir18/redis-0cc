@@ -3590,7 +3590,7 @@ int iAmMaster(void);
 #define STRINGIFY(x) STRINGIFY_(x)
 
 /* Cornflakes */
-int cornflakesProcessEvents(void* conn, void *arena);
-void cornflakesMain(aeEventLoop *eventLoop, void *conn, void *arena);
+int cornflakesProcessEvents(struct redisServer *s);
+void cornflakesMain(struct redisServer *s);
 
 #endif

@@ -7060,7 +7060,7 @@ int main(int argc, char **argv) {
     redisSetCpuAffinity(server.server_cpulist);
     setOOMScoreAdj(-1);
 
-    cornflakesMain(server.el, server.conn, server.arena);
+    cornflakesMain(&server);
     aeDeleteEventLoop(server.el);
     return 0;
 }
@@ -7137,16 +7137,16 @@ void handleGetM(ReceivedPkt *pkt, uint16_t size, void *conn, void* arena,
 
 /* Pop and handle packets from the Cornflakes datapath. Returns the number of
  * processed packets */
-int cornflakesProcessEvents(void *conn, void *arena) {
+int cornflakesProcessEvents(struct redisServer *s) {
     int processed = 0;
     size_t n = 0, j;
 
-    if (conn == NULL) {
+    if (s->conn == NULL) {
         printf("Expected conn != NULL, called from redis-benchmark.c?\n");
         exit(1);
     }
 
-    struct ReceivedPkt* pkts = Mlx5Connection_pop(conn, &n);
+    struct ReceivedPkt* pkts = Mlx5Connection_pop(s->conn, &n);
     if (n == 0)
         goto done;
 
@@ -7174,22 +7174,22 @@ int cornflakesProcessEvents(void *conn, void *arena) {
         msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
         size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
         if (msg_type == 2) {
-            handleGetM(pkt, size, conn, arena, j == n-1);
+            handleGetM(pkt, size, s->conn, s->arena, j == n-1);
         } else {
             printf("unrecognized message type for kv store app.\n");
             exit(1);
         }
-        Bump_reset(arena);
+        Bump_reset(s->arena);
     }
 
 done:
     return processed;
 }
 
-void cornflakesMain(aeEventLoop *eventLoop, void *conn, void *arena) {
-    eventLoop->stop = 0;
-    while (!eventLoop->stop)
-        cornflakesProcessEvents(conn, arena);
+void cornflakesMain(struct redisServer *s) {
+    s->el->stop = 0;
+    while (!s->el->stop)
+        cornflakesProcessEvents(s);
 }
 
 /* The End */

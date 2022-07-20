@@ -2590,7 +2590,9 @@ void initServer(void) {
     }
 
     /* Initialize the MLX5 connection. */
-    server.conn = Mlx5Connection_new("/users/ygina/config.yaml", "192.168.1.1");
+    const char *cf_config = getenv("CONFIG_PATH");
+    assert(cf_config != NULL);
+    server.conn = Mlx5Connection_new(cf_config, "192.168.1.1");
     if (server.conn == NULL) {
         serverLog(LL_WARNING, "Failed to initialize MLX5 connection.");
         exit(1);

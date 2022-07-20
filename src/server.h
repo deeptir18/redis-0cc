@@ -1449,11 +1449,14 @@ typedef enum childInfoType {
 } childInfoType;
 
 struct redisServer {
+    /* Cornflakes */
+    int use_cornflakes;         /* Whether to use Cornflakes serialization */
+    void *conn;                 /* MLX5 connection */
+    void *arena;                /* bumpalo::Bump */
+
     /* General */
     pid_t pid;                  /* Main process pid. */
     pthread_t main_thread_id;         /* Main thread id */
-    void *conn;                 /* MLX5 connection */
-    void *arena;                /* bumpalo::Bump */
     char *configfile;           /* Absolute config file path, or NULL */
     char *executable;           /* Absolute executable file path. */
     char **exec_argv;           /* Executable argv vector (copy). */

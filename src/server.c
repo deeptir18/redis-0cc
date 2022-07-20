@@ -2614,13 +2614,27 @@ void initServer(void) {
         }
     }
 
-    /* Initialize the bumpalo arena. */
-    Bump_with_capacity(
-        32,   // batch_size
-        9216, // max_packet_size (jumbo frames turned on)
-        64,   // max_entries
-        &server.arena
-    );
+    /* Determine the serialization type and initialize the bumpalo arena if
+     * using Cornflakes serialization. */
+    const char *serialization = getenv("SERIALIZATION");
+    if (serialization == NULL) {
+        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
+        exit(1);
+    } else if (strcmp(serialization, "cornflakes")) {
+        server.use_cornflakes = true;
+        Bump_with_capacity(
+            32,   // batch_size
+            9216, // max_packet_size (jumbo frames turned on)
+            64,   // max_entries
+            &server.arena
+        );
+    } else if (strcmp(serialization, "redis")) {
+        server.use_cornflakes = false;
+        server.arena = NULL;
+    } else {
+        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
+        exit(1);
+    }
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */

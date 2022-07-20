@@ -535,7 +535,7 @@ void getrangeCommand(client *c) {
     }
 }
 
-void mgetCommand(client *c) {
+void mgetCommandRedis(client *c) {
     int j;
 
     addReplyArrayLen(c,c->argc-1);
@@ -551,6 +551,18 @@ void mgetCommand(client *c) {
             }
         }
     }
+}
+
+void mgetCommandCf(client *c) {
+    // TODO
+    exit(1);
+}
+
+void mgetCommand(client *c) {
+    if (c->use_cornflakes)
+        mgetCommandCf(c);
+    else
+        mgetCommandRedis(c);
 }
 
 void msetGenericCommand(client *c, int nx) {

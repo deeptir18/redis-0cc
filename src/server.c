@@ -7158,6 +7158,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
     ReceivedPkt *pkt;
     // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
+    c->use_cornflakes = false;
     for (size_t j = 0; j < n; j++) {
         pkt = &pkts[j];
 
@@ -7212,6 +7213,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     ReceivedPkt *pkt;
     // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
+    c->use_cornflakes = true;
     // uint16_t msg_type, size;
     for (size_t j = 0; j < n; j++) {
         pkt = &pkts[j];

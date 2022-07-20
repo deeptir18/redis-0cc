@@ -573,14 +573,19 @@ void mgetCommandCf(client *c) {
         VariableList_CFString_index(keys, i, &key);
         CFString_unpack(key, &key_buffer, &buffer_len);
 
-        // TODO: do something with the key
-        // Currently, uses the key as the value.
         // So many memory leaks in this code...
-        printf("key = %.*s\n", (int)buffer_len, key_buffer);
-        // robj *k = createStringObject((const char*)key_buffer, buffer_len);
-        // robj *o = lookupKeyRead(db, k);
-        // CFBytes_new(o->ptr, sdslen(o->ptr), c->datapath, &val_buffer);
-        CFBytes_new(key_buffer, buffer_len, c->datapath, &val_buffer);
+        // printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        robj *k = createObject(OBJ_STRING,sdsnewlen(key_buffer, buffer_len));
+        robj *o = lookupKeyRead(c->db, k);
+        if (o == NULL) {
+            // TODO: What should we return if the key doesn't exist? Probably
+            // whatever Redis returns. Currently uses the key as the value.
+            CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, &val_buffer);
+        } else {
+            // TODO: Untested code path.
+            assert(o->type == OBJ_STRING);
+            CFBytes_new(o->ptr, sdslen(o->ptr), c->datapath, &val_buffer);
+        }
         VariableList_CFBytes_append(vals, val_buffer);
     }
 }

@@ -124,8 +124,8 @@ ifneq ($(DEMIKERNEL_REPO_DIR),)
 export DEMIKERNEL_INCLUDE_DIR ?= $(DEMIKERNEL_REPO_DIR)/include
 export DEMIKERNEL_LIBOS_SO ?= $(DEMIKERNEL_REPO_DIR)/target/release/libdemikernel.so
 export DEMIKERNEL_LIBRARY_PATH ?= $(HOME)/lib:$(shell find $(HOME)/lib/ -name '*x86_64-linux-gnu*' -type d | xargs | sed -e 's/\s/:/g')
-FINAL_CFLAGS+=-I /users/ygina/cornflakes/mlx5-datapath-c -I /users/ygina/cornflakes/cf-kv/c/kv-sga-cornflakes-c -I $(DEMIKERNEL_INCLUDE_DIR) -D __DEMIKERNEL__
-FINAL_LDFLAGS+=-L/users/ygina/cornflakes/target/release -L/users/ygina/cornflakes/cf-kv/c/kv-sga-cornflakes-c/target/release -Wl,-rpath,$(DEMIKERNEL_LIBRARY_PATH)
+FINAL_CFLAGS+=-I $(HOME)/cornflakes/mlx5-datapath-c -I $(HOME)/cornflakes/cf-kv/c/kv-sga-cornflakes-c -I $(DEMIKERNEL_INCLUDE_DIR) -D __DEMIKERNEL__
+FINAL_LDFLAGS+=-L$(HOME)/cornflakes/target/release -L$(HOME)/cornflakes/cf-kv/c/kv-sga-cornflakes-c/target/release -Wl,-rpath,$(DEMIKERNEL_LIBRARY_PATH)
 FINAL_LIBS+=-lmlx5_datapath_c -lkv_sga_cornflakes_c $(DEMIKERNEL_LIBOS_SO)
 endif
 

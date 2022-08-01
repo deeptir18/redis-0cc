@@ -2592,7 +2592,7 @@ void initServer(void) {
     /* Initialize the MLX5 connection. */
     const char *cf_config = getenv("CONFIG_PATH");
     assert(cf_config != NULL);
-    server.datapath = Mlx5Connection_new(cf_config, "192.168.1.1");
+    Mlx5Connection_new(cf_config, "192.168.1.1", &server.datapath);
     if (server.datapath == NULL) {
         serverLog(LL_WARNING, "Failed to initialize MLX5 connection.");
         exit(1);
@@ -7083,14 +7083,19 @@ int main(int argc, char **argv) {
 
 int cornflakesProcessEventsRedis(struct redisServer *s,
                                  size_t n,
-                                 struct ReceivedPkt* pkts) {
+                                 void** pkts) {
     int processed = 0;
-    ReceivedPkt *pkt;
+    const unsigned char *data;
+    size_t data_len;
+    uint32_t msg_id;
+    size_t conn_id;
     // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
     c->use_cornflakes = false;
     for (size_t j = 0; j < n; j++) {
-        pkt = &pkts[j];
+        ReceivedPkt_unpack(pkts[j], &data, &data_len);
+        ReceivedPkt_msg_id(pkts[j], &msg_id);
+        ReceivedPkt_conn_id(pkts[j], &conn_id);
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
@@ -7100,7 +7105,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         c->reqtype = PROTO_REQ_MULTIBULK;
         // TODO: Remove Cornflakes header on the client side when using Redis
         // serialization.
-        c->querybuf = sdsnewlen(pkt->data + 4, pkt->data_len - 4);
+        c->querybuf = sdsnewlen(data + 4, data_len - 4);
         c->querybuf_peak = max(c->querybuf_peak, sdslen(c->querybuf));
 
         // Parse argc and argv from the multibulk buffer.
@@ -7123,8 +7128,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
 
         // When ready to send...
         if (Mlx5Connection_queue_single_buffer_with_copy(s->datapath,
-                pkt->msg_id, pkt->conn_id, (uint8_t*)c->buf, c->bufpos,
-                j == n-1) != 0) {
+                msg_id, conn_id, (uint8_t*)c->buf, c->bufpos, j == n-1) != 0) {
             printf("Error queueing single buffer\n");
             exit(1);
         }
@@ -7138,20 +7142,26 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
 
 int cornflakesProcessEventsCf(struct redisServer *s,
                               size_t n,
-                              struct ReceivedPkt* pkts) {
+                              void** pkts) {
     int processed = 0;
-    ReceivedPkt *pkt;
+    const unsigned char *data;
+    size_t data_len;
+    uint32_t msg_id;
+    size_t conn_id;
+
     // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
     c->use_cornflakes = true;
     c->datapath = s->datapath;
     uint16_t msg_type, size;
     for (size_t j = 0; j < n; j++) {
-        pkt = &pkts[j];
+        ReceivedPkt_unpack(pkts[j], &data, &data_len);
+        ReceivedPkt_msg_id(pkts[j], &msg_id);
+        ReceivedPkt_conn_id(pkts[j], &conn_id);
 
         // Read first four bytes of packet to determine message type.
-        msg_type = (uint16_t)pkt->data[1] | (uint16_t)(pkt->data[0] << 8);
-        size     = (uint16_t)pkt->data[3] | (uint16_t)(pkt->data[2] << 8);
+        msg_type = (uint16_t)data[1] | (uint16_t)(data[0] << 8);
+        size     = (uint16_t)data[3] | (uint16_t)(data[2] << 8);
         assert(msg_type == 2);
 
         ////////////////////////////////////////////////////////////////////////
@@ -7161,8 +7171,8 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         if (msg_type == 2) {
             GetMReq_new(&c->cf_req);
             if (GetMReq_deserialize_from_buf(c->cf_req,
-                                             pkt->data + 4,
-                                             pkt->data_len - 4) != 0) {
+                                             data + 4,
+                                             data_len - 4) != 0) {
                 printf("Error deserializing GetMReq\n");
                 exit(1);
             }
@@ -7196,8 +7206,8 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 
         // When ready to send...
         // Queue the ArenaOrderedRcSga (consumes sga)
-        if (Mlx5Connection_queue_arena_ordered_rcsga(s->datapath, pkt->msg_id,
-                pkt->conn_id, sga, j == n-1) != 0) {
+        if (Mlx5Connection_queue_arena_ordered_rcsga(s->datapath, msg_id,
+                conn_id, sga, j == n-1) != 0) {
             printf("Error queueing ArenaOrderedRcSga\n");
             exit(1);
         }
@@ -7218,8 +7228,9 @@ int cornflakesProcessEvents(struct redisServer *s) {
         exit(1);
     }
 
+    void** pkts;
     size_t n = 0;
-    struct ReceivedPkt* pkts = Mlx5Connection_pop(s->datapath, &n);
+    Mlx5Connection_pop(s->datapath, &pkts, &n);
     if (n == 0) return 0;
 
     if (s->use_cornflakes)

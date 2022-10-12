@@ -2602,17 +2602,17 @@ void initServer(void) {
     Mlx5Connection_set_copying_threshold(server.datapath, 256);
     Mlx5Connection_set_inline_mode(server.datapath, 0);
 
-    size_t buf_size = 256;
-    const size_t max_size = 16384;
-    const size_t min_elts = 8192;
-    while(1) {
-        serverLog(LL_NOTICE, "Adding TX memory pool of size %ld.", buf_size);
-        Mlx5Connection_add_tx_mempool(server.datapath, buf_size, min_elts);
-        buf_size *= 2;
-        if (buf_size > max_size) {
-            break;
-        }
-    }
+    // size_t buf_size = 256;
+    // const size_t max_size = 16384;
+    // const size_t min_elts = 8192;
+    // while(1) {
+    //     serverLog(LL_NOTICE, "Adding TX memory pool of size %ld.", buf_size);
+    //     Mlx5Connection_add_tx_mempool(server.datapath, buf_size, min_elts);
+    //     buf_size *= 2;
+    //     if (buf_size > max_size) {
+    //         break;
+    //     }
+    // }
 
     /* Determine the serialization type and initialize the bumpalo arena if
      * using Cornflakes serialization. */

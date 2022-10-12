@@ -120,13 +120,19 @@ FINAL_LDFLAGS=$(LDFLAGS) $(REDIS_LDFLAGS) $(DEBUG)
 FINAL_LIBS=-lm
 DEBUG=-g -ggdb
 
+# Cornflakes
+export CORNFLAKES_PATH = /mydata/ygina/cornflakes
+FINAL_CFLAGS+=-I $(CORNFLAKES_PATH)/mlx5-datapath-c -I $(CORNFLAKES_PATH)/cf-kv/c/kv-sga-cornflakes-c
+FINAL_LDFLAGS+=-L$(CORNFLAKES_PATH)/target/release -L$(CORNFLAKES_PATH)/cf-kv/c/kv-sga-cornflakes-c/target/release
+FINAL_LIBS+=-lmlx5_datapath_c -lkv_sga_cornflakes_c
+
 ifneq ($(DEMIKERNEL_REPO_DIR),)
 export DEMIKERNEL_INCLUDE_DIR ?= $(DEMIKERNEL_REPO_DIR)/include
 export DEMIKERNEL_LIBOS_SO ?= $(DEMIKERNEL_REPO_DIR)/target/release/libdemikernel.so
 export DEMIKERNEL_LIBRARY_PATH ?= $(HOME)/lib:$(shell find $(HOME)/lib/ -name '*x86_64-linux-gnu*' -type d | xargs | sed -e 's/\s/:/g')
-FINAL_CFLAGS+=-I $(HOME)/cornflakes/mlx5-datapath-c -I $(HOME)/cornflakes/cf-kv/c/kv-sga-cornflakes-c -I $(DEMIKERNEL_INCLUDE_DIR) -D __DEMIKERNEL__
-FINAL_LDFLAGS+=-L$(HOME)/cornflakes/target/release -L$(HOME)/cornflakes/cf-kv/c/kv-sga-cornflakes-c/target/release -Wl,-rpath,$(DEMIKERNEL_LIBRARY_PATH)
-FINAL_LIBS+=-lmlx5_datapath_c -lkv_sga_cornflakes_c $(DEMIKERNEL_LIBOS_SO)
+FINAL_CFLAGS+=-I $(DEMIKERNEL_INCLUDE_DIR) -D __DEMIKERNEL__
+FINAL_LDFLAGS+=-Wl,-rpath,$(DEMIKERNEL_LIBRARY_PATH)
+FINAL_LIBS+=$(DEMIKERNEL_LIBOS_SO)
 endif
 
 # Linux ARM32 needs -latomic at linking time

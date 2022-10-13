@@ -565,7 +565,7 @@ void mgetCommandCf(client *c) {
     // Initialize the response values based on the request keys
     GetMReq_get_keys(c->cf_req, &keys);
     VariableList_CFString_len(keys, &keys_len);
-    GetMResp_init_vals(c->cf_res, keys_len);
+    GetMResp_init_vals(c->cf_res, keys_len, c->arena);
     GetMResp_get_mut_vals(c->cf_res, &vals);
 
     // Populate the response by querying the request keys
@@ -580,14 +580,14 @@ void mgetCommandCf(client *c) {
         if (o == NULL) {
             // TODO: What should we return if the key doesn't exist? Probably
             // whatever Redis returns. Currently uses the key as the value.
-            if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, &val) != 0) {
+            if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->cc, &val) != 0) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }
         } else {
             // TODO: Untested code path.
             assert(o->type == OBJ_STRING);
-            if(CFBytes_new(o->ptr, sdslen(o->ptr), c->datapath, &val) != 0) {
+            if(CFBytes_new(o->ptr, sdslen(o->ptr), c->datapath, c->cc, &val) != 0) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }

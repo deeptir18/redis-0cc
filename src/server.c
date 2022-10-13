@@ -2599,7 +2599,6 @@ void initServer(void) {
     } else {
         serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
-    Mlx5Connection_set_copying_threshold(server.datapath, 256);
     Mlx5Connection_set_inline_mode(server.datapath, 0);
 
     // size_t buf_size = 256;
@@ -2618,10 +2617,21 @@ void initServer(void) {
      * using Cornflakes serialization. */
     const char *serialization = getenv("SERIALIZATION");
     if (serialization == NULL) {
-        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
+        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes0c', "
+           "'cornflakes1c', or 'redis'\n");
         exit(1);
-    } else if (strcmp(serialization, "cornflakes") == 0) {
+    } else if (strcmp(serialization, "cornflakes0c") == 0) {
         server.use_cornflakes = true;
+        Mlx5Connection_set_copying_threshold(server.datapath, 256);
+        Bump_with_capacity(
+            32,   // batch_size
+            9216, // max_packet_size (jumbo frames turned on)
+            64,   // max_entries
+            &server.arena
+        );
+    } else if (strcmp(serialization, "cornflakes1c") == 0) {
+        server.use_cornflakes = true;
+        Mlx5Connection_set_copying_threshold(server.datapath, SIZE_MAX);
         Bump_with_capacity(
             32,   // batch_size
             9216, // max_packet_size (jumbo frames turned on)

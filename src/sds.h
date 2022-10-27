@@ -40,6 +40,25 @@ extern const char *SDS_NOINIT;
 #include <stdarg.h>
 #include <stdint.h>
 
+/* RawString Object: encompasses a pointer and length. Cannot grow. */
+typedef struct __attribute__ ((__packed__)) ZeroCopyString {
+    size_t len;
+    char *ptr;
+} rawstring;
+
+rawstring *rawstringnew(char *ptr, size_t len);
+
+void rawstringfree(rawstring *rawstr);
+
+static inline size_t rawstringlen(rawstring *rawstr) {
+    return rawstr->len;
+}
+
+static inline char *rawstringpointer(rawstring *rawstr) {
+    return rawstr->ptr;
+}
+
+
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.

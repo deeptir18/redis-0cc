@@ -73,6 +73,10 @@ robj *makeObjectShared(robj *o) {
     return o;
 }
 
+robj *createZeroCopyStringObject(char *ptr, size_t len) {
+    return createObject(OBJ_ZERO_COPY_STRING, rawstringnew(ptr, len));
+}
+
 /* Create a string object with encoding OBJ_ENCODING_RAW, that is a plain
  * string object where o->ptr points to a proper sds string. */
 robj *createRawStringObject(const char *ptr, size_t len) {
@@ -768,8 +772,10 @@ int equalStringObjects(robj *a, robj *b) {
 }
 
 size_t stringObjectLen(robj *o) {
-    serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
-    if (sdsEncodedObject(o)) {
+    serverAssertWithInfo(NULL,o,o->type == OBJ_STRING || o->type == OBJ_ZERO_COPY_STRING);
+    if (rawStringObject(o)) {
+        return rawstringlen((rawstring *)(o->ptr));
+    } else if (sdsEncodedObject(o)) {
         return sdslen(o->ptr);
     } else {
         return sdigits10((long)o->ptr);

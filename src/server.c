@@ -2591,8 +2591,9 @@ void initServer(void) {
 
     /* Initialize the MLX5 connection. */
     const char *cf_config = getenv("CONFIG_PATH");
+    const char *server_ip = getenv("SERVER_IP");
     assert(cf_config != NULL);
-    server.datapath = Mlx5Connection_new(cf_config, "192.168.1.1");
+    server.datapath = Mlx5Connection_new(cf_config, server_ip);
     if (server.datapath == NULL) {
         serverLog(LL_WARNING, "Failed to initialize MLX5 connection.");
         exit(1);
@@ -2612,6 +2613,14 @@ void initServer(void) {
     //         break;
     //     }
     // }
+    //
+    // TODO: read environment variable for Loading file, and load redis values
+    // into the DB allocating values from the datapath
+    // then each client should have a copy of the db?? probably?? who knows
+    // Just load the data into server.db[0]
+    // Key can be allocated anywhere
+    // Make sure values are allocated properly
+    // Also needs to be parametrized over "num keys" and "num values"
 
     /* Determine the serialization type and initialize the bumpalo arena if
      * using Cornflakes serialization. */
@@ -2622,7 +2631,13 @@ void initServer(void) {
         exit(1);
     } else if (strcmp(serialization, "cornflakes0c") == 0) {
         server.use_cornflakes = true;
-        Mlx5Connection_set_copying_threshold(server.datapath, 256);
+        const char *copy_threshold_str = getenv("COPY_THRESHOLD");
+        size_t copy_threshold = 256;
+        char *ptr = NULL;
+        if (copy_threshold_str != NULL) {
+            copy_threshold=strtol(copy_threshold_str, &ptr, 10);
+        }
+        Mlx5Connection_set_copying_threshold(server.datapath, copy_threshold);
         Bump_with_capacity(
             32,   // batch_size
             9216, // max_packet_size (jumbo frames turned on)
@@ -2645,6 +2660,95 @@ void initServer(void) {
         printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
         exit(1);
     }
+
+    // DB ycsb options
+    const char *num_values_str = getenv("NUM_VALUES");
+    size_t num_values = 1;
+    const char *num_keys_str = getenv("NUM_KEYS");
+    size_t num_keys = 1;
+    const char *value_size_str = getenv("VALUE_SIZE");
+    char *ptr = NULL;
+    
+    if (num_values_str != NULL) {
+        num_values = (size_t)(strtol(num_values_str, &ptr, 10));
+    }
+    if (num_keys_str != NULL) {
+        num_keys = (size_t)(strtol(num_keys_str, &ptr, 10));
+    }
+    if (value_size_str != NULL) {
+        value_size_str = "UniformOverSizes-1024";
+    }
+
+    const char *server_db_trace = getenv("YCSB_TRACE");
+    if (server_db_trace != NULL) {
+        /* Step 1: Load rust backing db or rust backing list db (pointer to rust hashmap) */
+        int ret = Mlx5Connection_load_ycsb_db(server.datapath, server_db_trace, &server.rust_backing_db, &server.rust_backing_list_db, num_keys, num_values, value_size_str);
+        if (ret != 0) {
+            printf("Error: Could not run Mlx5_load_dbs with file %s\n", server_db_trace);
+            exit(1);
+        }
+        
+        /* Step 2: Iterate over the rust backing db to load redis server */
+        void *db_keys_vec;
+        size_t db_keys_len = 0;
+        Mlx5Connection_get_db_keys_vec(server.rust_backing_db, &db_keys_vec, &db_keys_len);
+        if (db_keys_vec == NULL) {
+            printf("Error: Could not get iterator over rust backing db.\n");
+            exit(1);
+        }
+        void *key_ptr = NULL;
+        size_t key_len = 0;
+        void *value_ptr = NULL;
+        size_t value_len = 0;
+        for (size_t key_idx = 0; key_idx < db_keys_len; key_idx++) {
+            Mlx5Connection_get_db_value_at(server.rust_backing_db, db_keys_vec, key_idx, &key_ptr, &key_len, &value_ptr, &value_len);
+            if (key_ptr != NULL && value_ptr != NULL) {
+                /* for keys - just use plain redis sds strings */
+                robj *k = createStringObject((char *)key_ptr, key_len);
+                robj *v = createZeroCopyStringObject((char *)value_ptr, value_len);
+                dbAdd(&server.db[0], k, v);
+            } else {
+                printf("ERROR: Could not load value for key %lu from kv store", key_idx);
+            }
+        }
+
+        void *list_ptr = NULL;
+        size_t list_size = 0;
+        size_t list_db_keys_len = 0;
+        void *list_db_keys_vec = NULL;
+        Mlx5Connection_get_list_db_keys_vec(server.rust_backing_list_db, &list_db_keys_vec, &list_db_keys_len);
+        if (list_db_keys_vec == NULL) {
+            printf("Error: Could not get list db iterator over rust backing list db.\n");
+        }
+        for (size_t key_idx = 0; key_idx < list_db_keys_len; key_idx++) {
+            // gets a pointer
+            Mlx5Connection_list_db_get_list_size(server.rust_backing_list_db, list_db_keys_vec, key_idx, &key_ptr, &key_len, &list_size);
+            if (key_ptr != NULL && list_ptr != NULL) {
+                // create a new list object
+                robj *k = createStringObject ((char *)key_ptr, key_len);
+                robj *list = createQuicklistObject();
+                quicklistSetOptions(list->ptr, server.list_max_listpack_size, server.list_compress_depth);
+                for (size_t list_idx = 0; list_idx < list_size; list_idx++) {
+                    Mlx5Connection_list_db_get_value_at_idx(server.rust_backing_list_db, list_db_keys_vec, key_idx, list_idx, &value_ptr, &value_len);
+                    robj *value_obj = createZeroCopyStringObject((char *)value_ptr, value_len);
+                    if (value_ptr != NULL) {
+                        // -1 is the tail of the list
+                        // TODO: can we import from t_list.h directly?
+                        listTypePush(list, value_obj, -1);
+                    }
+                }
+                dbAdd(&server.db[0], k, list);
+            } else {
+                printf("ERROR: List db key or value null for key_idx %lu.\n", key_idx);
+                break;
+            }
+        }
+
+
+        
+    }
+
+    /* Load rust backing db and then redis db if trace is not null. */
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */
@@ -7159,26 +7263,26 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     c->datapath = s->datapath;
     c->arena = s->arena;
     uint16_t msg_type;
+    uint16_t msg_size;
     uint32_t msg_id;
     size_t conn_id;
     if (CopyContext_new(s->arena, s->datapath, &c->cc) != 0) {
         printf("Error allocating CopyContext\n");
         exit(1);
     }
-    if (CopyContext_reset(c->cc, s->datapath) != 0) {
-        printf("Error resetting CopyContext\n");
-        exit(1);
-    }
     for (size_t j = 0; j < n; j++) {
 
         // Read first four bytes of packet to determine message type.
-        ReceivedPkt_msg_type(pkts[j], &msg_type);
-        assert(msg_type == 2);
+        ReceivedPkt_msg_type(pkts[j], &msg_size, &msg_type);
+        assert(msg_type == 2 || msg_type == 0);
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
-
-        if (msg_type == 2) {
+        
+        if (msg_type == 0) {
+            // TODO
+        
+        } else if (msg_type == 2) {
             GetMReq_new_in(s->arena, &c->cf_req);
             // REQ_TYPE_SIZE = 4
             if (GetMReq_deserialize(c->cf_req, pkts[j], 4, s->arena) != 0) {
@@ -7198,7 +7302,11 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 
         // void *sga;
         // size_t num_entries;
-        if (msg_type == 2) {
+        if (msg_type == 0) {
+            c->cmd = dictFetchValue(s->commands,
+                    createObject(OBJ_STRING, sdsnew("GET"))->ptr);
+            c->cmd->proc(c);
+        } else if (msg_type == 2) {
             c->cmd = dictFetchValue(s->commands,
                 createObject(OBJ_STRING,sdsnew("MGET"))->ptr);
             c->cmd->proc(c);
@@ -7207,19 +7315,17 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         ////////////////////////////////////////////////////////////////////////
         // STEP 3: Serialize and send the response.
 
-        // // When ready to send...
-        // // Queue the ArenaOrderedRcSga (consumes sga)
-        // if (Mlx5Connection_queue_arena_ordered_rcsga(s->datapath, pkt->msg_id,
-        //         pkt->conn_id, sga, j == n-1) != 0) {
-        //     printf("Error queueing ArenaOrderedRcSga\n");
-        //     exit(1);
-        // }
         ReceivedPkt_msg_id(pkts[j], &msg_id);
         ReceivedPkt_conn_id(pkts[j], &conn_id);
-        if (Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
+
+        if (msg_type == 0) {
+            // TODO
+        } else if (msg_type == 2) {
+            if (Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
                 msg_id, conn_id, c->cc, c->cf_res, j == n-1) != 0) {
-            printf("Error queueing GetMResp\n");
-            exit(1);
+                printf("Error queueing GetMResp\n");
+                exit(1);
+            }
         }
 
         processed++;

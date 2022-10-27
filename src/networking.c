@@ -383,7 +383,10 @@ void _addReplyToBufferOrList(client *c, const char *s, size_t len) {
 void addReply(client *c, robj *obj) {
     if (prepareClientToWrite(c) != C_OK) return;
 
-    if (sdsEncodedObject(obj)) {
+    if (rawStringObject(obj)) {
+        // for zero-copy encoded string, copy the pointer directly in
+        _addReplyToBufferOrList(c, rawstringpointer(obj->ptr), rawstringlen(obj->ptr));
+    } else if (sdsEncodedObject(obj)) {
         _addReplyToBufferOrList(c,obj->ptr,sdslen(obj->ptr));
     } else if (obj->encoding == OBJ_ENCODING_INT) {
         /* For integer encoded strings we just convert it into a string

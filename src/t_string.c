@@ -575,8 +575,9 @@ void mgetCommandCf(client *c) {
 
         // So many memory leaks in this code...
         // printf("key = %.*s\n", (int)buffer_len, key_buffer);
-        robj *k = createObject(OBJ_STRING,sdsnewlen(key_buffer, buffer_len));
+        robj *k = createObject(OBJ_STRING, (void *)key_buffer);
         robj *o = lookupKeyRead(c->db, k);
+
         if (o == NULL) {
             // TODO: What should we return if the key doesn't exist? Probably
             // whatever Redis returns. Currently uses the key as the value.

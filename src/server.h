@@ -647,6 +647,7 @@ typedef enum {
 #define OBJ_SET 2       /* Set object. */
 #define OBJ_ZSET 3      /* Sorted set object. */
 #define OBJ_HASH 4      /* Hash object. */
+#define OBJ_ZERO_COPY_STRING 5 /* Zero-Copy string object */
 
 /* The "module" object type is a special one that signals that the object
  * is one directly managed by a Redis module. In this case the value points
@@ -1460,6 +1461,9 @@ struct redisServer {
     /* Cornflakes */
     int use_cornflakes;         /* Whether to use Cornflakes serialization */
     void *datapath;             /* MLX5 connection */
+    void *rust_backing_db;      /* Backing Rust DB for single kv pairs */
+    void *rust_backing_list_db; /* Backing Rust DB for k->list pairs */
+
     void *arena;                /* bumpalo::Bump */
 
     /* General */
@@ -2636,6 +2640,7 @@ void freeHashObject(robj *o);
 void dismissObject(robj *o, size_t dump_size);
 robj *createObject(int type, void *ptr);
 robj *createStringObject(const char *ptr, size_t len);
+robj *createZeroCopyStringObject(char *ptr, size_t len);
 robj *createRawStringObject(const char *ptr, size_t len);
 robj *createEmbeddedStringObject(const char *ptr, size_t len);
 robj *tryCreateRawStringObject(const char *ptr, size_t len);
@@ -2674,6 +2679,7 @@ int collateStringObjects(robj *a, robj *b);
 int equalStringObjects(robj *a, robj *b);
 unsigned long long estimateObjectIdleTime(robj *o);
 void trimStringObjectIfNeeded(robj *o);
+#define rawStringObject(objptr) (objptr->type == OBJ_ZERO_COPY_STRING)
 #define sdsEncodedObject(objptr) (objptr->encoding == OBJ_ENCODING_RAW || objptr->encoding == OBJ_ENCODING_EMBSTR)
 
 /* Synchronous I/O with timeout */

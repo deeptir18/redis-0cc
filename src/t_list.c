@@ -41,7 +41,11 @@
 void listTypePush(robj *subject, robj *value, int where) {
     if (subject->encoding == OBJ_ENCODING_QUICKLIST) {
         int pos = (where == LIST_HEAD) ? QUICKLIST_HEAD : QUICKLIST_TAIL;
-        if (value->encoding == OBJ_ENCODING_INT) {
+        if (rawStringObject(value)) {
+            /* If zero-copy string object, push pointer and len manually */
+            rawstring *rawstringval = (rawstring *)value->ptr;
+            quicklistPush(subject->ptr, rawstringpointer(rawstringval), rawstringlen(rawstringval), pos);
+        } else if (value->encoding == OBJ_ENCODING_INT) {
             char buf[32];
             ll2string(buf, 32, (long)value->ptr);
             quicklistPush(subject->ptr, buf, strlen(buf), pos);

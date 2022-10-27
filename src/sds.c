@@ -41,6 +41,18 @@
 
 const char *SDS_NOINIT = "SDS_NOINIT";
 
+rawstring *rawstringnew(char *ptr, size_t len) {
+    // TODO: is zmalloc the right thing to use here?
+    rawstring *rawstr = (rawstring *)(zmalloc(sizeof(rawstring)));
+    rawstr->len = len;
+    rawstr->ptr = ptr;
+    return rawstr;
+}
+
+void rawstringfree(rawstring *rawstr) {
+    free(rawstr);
+}
+
 static inline int sdsHdrSize(char type) {
     switch(type&SDS_TYPE_MASK) {
         case SDS_TYPE_5:

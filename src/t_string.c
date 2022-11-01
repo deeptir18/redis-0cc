@@ -574,9 +574,11 @@ void mgetCommandCf(client *c) {
         CFString_unpack(key, &key_buffer, &buffer_len);
 
         // So many memory leaks in this code...
-        // printf("key = %.*s\n", (int)buffer_len, key_buffer);
-        robj *k = createObject(OBJ_STRING, (void *)key_buffer);
+        printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        robj *k = createStringObject((char *)key_buffer, buffer_len);
         robj *o = lookupKeyRead(c->db, k);
+        printf("obj that was queried: %p\n", o);
+        printf("obj = %.*s\n", (int)rawstringlen((rawstring *)o->ptr),rawstringpointer ((rawstring *)o->ptr));
 
         if (o == NULL) {
             // TODO: What should we return if the key doesn't exist? Probably
@@ -586,9 +588,7 @@ void mgetCommandCf(client *c) {
                 exit(1);
             }
         } else {
-            // TODO: Untested code path.
-            assert(o->type == OBJ_STRING);
-            if(CFBytes_new(o->ptr, sdslen(o->ptr), c->datapath, c->cc, &val) != 0) {
+            if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->cc, &val) != 0) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }

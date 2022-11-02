@@ -2590,6 +2590,7 @@ void initServer(void) {
     }
 
     /* Initialize the MLX5 connection. */
+    // global debug init for error messages
     const char *cf_config = getenv("CONFIG_PATH");
     const char *server_ip = getenv("SERVER_IP");
     assert(cf_config != NULL);
@@ -2601,26 +2602,6 @@ void initServer(void) {
         serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
     Mlx5Connection_set_inline_mode(server.datapath, 0);
-
-    // size_t buf_size = 256;
-    // const size_t max_size = 16384;
-    // const size_t min_elts = 8192;
-    // while(1) {
-    //     serverLog(LL_NOTICE, "Adding TX memory pool of size %ld.", buf_size);
-    //     Mlx5Connection_add_tx_mempool(server.datapath, buf_size, min_elts);
-    //     buf_size *= 2;
-    //     if (buf_size > max_size) {
-    //         break;
-    //     }
-    // }
-    //
-    // TODO: read environment variable for Loading file, and load redis values
-    // into the DB allocating values from the datapath
-    // then each client should have a copy of the db?? probably?? who knows
-    // Just load the data into server.db[0]
-    // Key can be allocated anywhere
-    // Make sure values are allocated properly
-    // Also needs to be parametrized over "num keys" and "num values"
 
     /* Determine the serialization type and initialize the bumpalo arena if
      * using Cornflakes serialization. */
@@ -2660,6 +2641,17 @@ void initServer(void) {
         printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
         exit(1);
     }
+
+    const char *inline_mode = getenv("INLINE_MODE");
+
+    if (strcmp(inline_mode, "nothing") == 0) {
+        Mlx5Connection_set_inline_mode(server.datapath, 0);
+    } else if (strcmp(inline_mode, "packetheader") == 0) {
+        Mlx5Connection_set_inline_mode(server.datapath, 1);
+    } else if (strcmp(inline_mode, "objectheader") == 0) {
+        Mlx5Connection_set_inline_mode(server.datapath, 2);
+    }
+
 
     // DB ycsb options
     const char *num_values_str = getenv("NUM_VALUES");
@@ -2748,6 +2740,7 @@ void initServer(void) {
         
     }
 
+    Mlx5_global_debug_init();
     /* Load rust backing db and then redis db if trace is not null. */
 
     /* Create an event handler for accepting new connections in TCP and Unix
@@ -7266,12 +7259,12 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     uint16_t msg_size;
     uint32_t msg_id;
     size_t conn_id;
-    if (CopyContext_new(s->arena, s->datapath, &c->cc) != 0) {
-        printf("Error allocating CopyContext\n");
-        exit(1);
-    }
     for (size_t j = 0; j < n; j++) {
 
+        if (CopyContext_new(s->arena, s->datapath, &c->cc) != 0) {
+            printf("Error allocating CopyContext\n");
+            exit(1);
+        }
         // Read first four bytes of packet to determine message type.
         ReceivedPkt_msg_type(pkts[j], &msg_size, &msg_type);
         assert(msg_type == 2 || msg_type == 0);
@@ -7280,7 +7273,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         // STEP 1: Deserialize the incoming request.
         
         if (msg_type == 0) {
-            // TODO
+            // TODO: handle plain get message
         
         } else if (msg_type == 2) {
             GetMReq_new_in(s->arena, &c->cf_req);
@@ -7295,13 +7288,13 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             GetMResp_new_in(s->arena, &c->cf_res);
             GetMReq_get_id(c->cf_req, &msg_id);
             GetMResp_set_id(c->cf_res, msg_id);
+        } else if (msg_type == 4) {
+            // TODO: handle getList message
+
         }
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
-
-        // void *sga;
-        // size_t num_entries;
         if (msg_type == 0) {
             c->cmd = dictFetchValue(s->commands,
                     createObject(OBJ_STRING, sdsnew("GET"))->ptr);
@@ -7309,6 +7302,10 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         } else if (msg_type == 2) {
             c->cmd = dictFetchValue(s->commands,
                 createObject(OBJ_STRING,sdsnew("MGET"))->ptr);
+            c->cmd->proc(c);
+        } else if (msg_type == 4) {
+            c->cmd = dictFetchValue(s->commands,
+                    createObject(OBJ_STRING, sdsnew("LRANGE"))->ptr);  
             c->cmd->proc(c);
         }
 
@@ -7321,12 +7318,22 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         if (msg_type == 0) {
             // TODO
         } else if (msg_type == 2) {
-            if (Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
-                msg_id, conn_id, c->cc, c->cf_res, j == n-1) != 0) {
-                printf("Error queueing GetMResp\n");
+            int ret = Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
+                msg_id, conn_id, c->cc, c->cf_res, j == n-1);
+            if (ret != 0) {
+                printf("Error queueing GetMResp: returned %d\n", ret);
                 exit(1);
             }
+
+        } else if (msg_type == 4) {
+            // TODO: handle getlist / lrange command
         }
+
+        // drop the incoming deserialized request
+        GetMReq_free(c->cf_req);
+        // drop the incoming received packet
+        ReceivedPkt_free(pkts[j]);
+
 
         processed++;
     }

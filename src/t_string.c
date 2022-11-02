@@ -540,14 +540,18 @@ void mgetCommandRedis(client *c) {
     int j;
 
     addReplyArrayLen(c,c->argc-1);
+    printf("Array len: %d\n", c->argc - 1);
     for (j = 1; j < c->argc; j++) {
         robj *o = lookupKeyRead(c->db,c->argv[j]);
         if (o == NULL) {
             addReplyNull(c);
         } else {
-            if (o->type != OBJ_STRING) {
+            printf("Found redis object for arg %d; type: %d\n", j, o->type);
+            if (o->type != OBJ_STRING && o->type != OBJ_ZERO_COPY_STRING) {
+                printf("Adding reply null\n");
                 addReplyNull(c);
             } else {
+                printf("Adding reply bulk\n");
                 addReplyBulk(c,o);
             }
         }
@@ -574,11 +578,11 @@ void mgetCommandCf(client *c) {
         CFString_unpack(key, &key_buffer, &buffer_len);
 
         // So many memory leaks in this code...
-        printf("key = %.*s\n", (int)buffer_len, key_buffer);
+        //printf("key = %.*s\n", (int)buffer_len, key_buffer);
         robj *k = createStringObject((char *)key_buffer, buffer_len);
         robj *o = lookupKeyRead(c->db, k);
-        printf("obj that was queried: %p\n", o);
-        printf("obj = %.*s\n", (int)rawstringlen((rawstring *)o->ptr),rawstringpointer ((rawstring *)o->ptr));
+        //printf("obj that was queried: %p\n", o);
+        //printf("obj = %.*s\n", (int)rawstringlen((rawstring *)o->ptr),rawstringpointer ((rawstring *)o->ptr));
 
         if (o == NULL) {
             // TODO: What should we return if the key doesn't exist? Probably

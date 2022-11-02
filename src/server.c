@@ -7329,6 +7329,8 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             // TODO: handle getlist / lrange command
         }
 
+        // drop the copy context.
+        CopyContext_free(c->cc);
         // drop the incoming deserialized request
         GetMReq_free(c->cf_req);
         // drop the incoming received packet

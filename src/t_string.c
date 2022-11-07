@@ -312,6 +312,39 @@ void psetexCommand(client *c) {
     setGenericCommand(c,OBJ_PX,c->argv[1],c->argv[3],c->argv[2],UNIT_MILLISECONDS,NULL,NULL);
 }
 
+int getCommandCf(client *c) {
+    void* key = NULL;   // CFString*
+    void* val = NULL;   // CFBytes*
+    const unsigned char* key_buffer;
+    size_t buffer_len;
+
+    GetReq_get_key(c->cf_req, &key);
+    CFString_unpack(key, &key_buffer, &buffer_len);
+    robj *k = createStringObject((char *)key_buffer, buffer_len);
+    //printf("key = %.*s\n", (int)buffer_len, key_buffer);
+    robj *o = lookupKeyRead(c->db, k);
+    //printf("obj that was queried: %p\n", o);
+    //printf("obj = %.*s\n", (int)rawstringlen((rawstring *)o->ptr),rawstringpointer ((rawstring *)o->ptr));
+
+    if (o == NULL) {
+        // TODO: What should we return if the key doesn't exist? Probably
+        // whatever Redis returns. Currently uses the key as the value.
+        if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->cc, &val) != 0) {
+            printf("Error allocating CFBytes");
+            exit(1);
+        }
+    } else {
+        if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->cc, &val) != 0) {
+            printf("Error allocating CFBytes");
+            exit(1);
+        }
+    }
+
+    // set the cf bytes pointer inside the struct
+    GetResp_set_val(c->cf_res, val);
+    return 0;
+}
+
 int getGenericCommand(client *c) {
     robj *o;
 
@@ -327,7 +360,11 @@ int getGenericCommand(client *c) {
 }
 
 void getCommand(client *c) {
-    getGenericCommand(c);
+    if (c->use_cornflakes) {
+        getCommandCf(c);
+    } else {
+        getGenericCommand(c);
+    }
 }
 
 /*
@@ -540,18 +577,17 @@ void mgetCommandRedis(client *c) {
     int j;
 
     addReplyArrayLen(c,c->argc-1);
-    printf("Array len: %d\n", c->argc - 1);
     for (j = 1; j < c->argc; j++) {
         robj *o = lookupKeyRead(c->db,c->argv[j]);
         if (o == NULL) {
             addReplyNull(c);
         } else {
-            printf("Found redis object for arg %d; type: %d\n", j, o->type);
+            //printf("Found redis object for arg %d; type: %d\n", j, o->type);
             if (o->type != OBJ_STRING && o->type != OBJ_ZERO_COPY_STRING) {
-                printf("Adding reply null\n");
+                //printf("Adding reply null\n");
                 addReplyNull(c);
             } else {
-                printf("Adding reply bulk\n");
+                //printf("Adding reply bulk\n");
                 addReplyBulk(c,o);
             }
         }

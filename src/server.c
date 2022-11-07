@@ -2687,6 +2687,8 @@ void initServer(void) {
         if (db_keys_vec == NULL) {
             printf("Error: Could not get iterator over rust backing db.\n");
             exit(1);
+        } else {
+            printf("Got rust backing db with len %lu\n", db_keys_len);
         }
         void *key_ptr = NULL;
         size_t key_len = 0;
@@ -2704,18 +2706,20 @@ void initServer(void) {
             }
         }
 
-        void *list_ptr = NULL;
         size_t list_size = 0;
         size_t list_db_keys_len = 0;
         void *list_db_keys_vec = NULL;
         Mlx5Connection_get_list_db_keys_vec(server.rust_backing_list_db, &list_db_keys_vec, &list_db_keys_len);
+        printf("Got list db keys vec\n");
         if (list_db_keys_vec == NULL) {
             printf("Error: Could not get list db iterator over rust backing list db.\n");
+        } else {
+            printf("Got list db keys vec with length %lu\n", list_db_keys_len);
         }
         for (size_t key_idx = 0; key_idx < list_db_keys_len; key_idx++) {
             // gets a pointer
             Mlx5Connection_list_db_get_list_size(server.rust_backing_list_db, list_db_keys_vec, key_idx, &key_ptr, &key_len, &list_size);
-            if (key_ptr != NULL && list_ptr != NULL) {
+            if (key_ptr != NULL) {
                 // create a new list object
                 robj *k = createStringObject ((char *)key_ptr, key_len);
                 robj *list = createQuicklistObject();
@@ -2731,7 +2735,7 @@ void initServer(void) {
                 }
                 dbAdd(&server.db[0], k, list);
             } else {
-                printf("ERROR: List db key or value null for key_idx %lu.\n", key_idx);
+                printf("ERROR: List db key null for key_idx %lu.\n", key_idx);
                 break;
             }
         }
@@ -7209,8 +7213,12 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         // serialization.
         ReceivedPkt_data(pkts[j], &data);
         ReceivedPkt_data_len(pkts[j], &data_len);
+        // TODO: is this copy necessary or fair?
         c->querybuf = sdsnewlen(data + 4, data_len - 4);
         c->querybuf_peak = max(c->querybuf_peak, sdslen(c->querybuf));
+        // for Redis serialization, argc needs to be reset before calling
+        // processMultiBulkBuffer
+        c->argc = 0;
 
         // Parse argc and argv from the multibulk buffer.
         if (processMultibulkBuffer(c) != C_OK) {
@@ -7238,6 +7246,8 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
             printf("Error queueing single buffer\n");
             exit(1);
         }
+
+        ReceivedPkt_free(pkts[j]);
 
         processed++;
     }
@@ -7267,18 +7277,25 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         }
         // Read first four bytes of packet to determine message type.
         ReceivedPkt_msg_type(pkts[j], &msg_size, &msg_type);
-        assert(msg_type == 2 || msg_type == 0);
+        assert(msg_type == 2 || msg_type == 0 || msg_type == 4);
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
         
         if (msg_type == 0) {
-            // TODO: handle plain get message
+            GetReq_new_in(s->arena, &c->cf_req);
+            if (GetReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
+                printf("Error deserializing GetReq\n");
+                exit(1);
+            }
+
+            GetResp_new_in(s->arena, &c->cf_res);
+            GetReq_get_id(c->cf_req, &msg_id);
+            GetResp_set_id(c->cf_res, msg_id);
         
         } else if (msg_type == 2) {
             GetMReq_new_in(s->arena, &c->cf_req);
-            // REQ_TYPE_SIZE = 4
-            if (GetMReq_deserialize(c->cf_req, pkts[j], 4, s->arena) != 0) {
+            if (GetMReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetMReq\n");
                 exit(1);
             }
@@ -7289,8 +7306,15 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             GetMReq_get_id(c->cf_req, &msg_id);
             GetMResp_set_id(c->cf_res, msg_id);
         } else if (msg_type == 4) {
-            // TODO: handle getList message
+            GetListReq_new_in(s->arena, &c->cf_req);
+            if (GetListReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
+                printf("Error deserializing GetReq\n");
+                exit(1);
+            }
 
+            GetListResp_new_in(s->arena, &c->cf_res);
+            GetListReq_get_id(c->cf_req, &msg_id);
+            GetListResp_set_id(c->cf_res, msg_id);
         }
 
         ////////////////////////////////////////////////////////////////////////
@@ -7316,7 +7340,13 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         ReceivedPkt_conn_id(pkts[j], &conn_id);
 
         if (msg_type == 0) {
-            // TODO
+            int ret = Mlx5Connection_GetResp_queue_cornflakes_obj(s->datapath, msg_id, conn_id, c->cc, c->cf_res, j == n-1);
+            if (ret != 0) {
+                printf("Error queueing GetResp: returned %d\n", ret);
+                exit(1);
+            }
+            // drop the incoming deserialized request
+            GetReq_free(c->cf_req);
         } else if (msg_type == 2) {
             int ret = Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
                 msg_id, conn_id, c->cc, c->cf_res, j == n-1);
@@ -7324,15 +7354,20 @@ int cornflakesProcessEventsCf(struct redisServer *s,
                 printf("Error queueing GetMResp: returned %d\n", ret);
                 exit(1);
             }
-
+            // drop the incoming deserialized request
+            GetMReq_free(c->cf_req);
         } else if (msg_type == 4) {
-            // TODO: handle getlist / lrange command
+            int ret = Mlx5Connection_GetListResp_queue_cornflakes_obj(s->datapath, msg_id, conn_id, c->cc, c->cf_res, j == n-1);
+            if (ret != 0) {
+                printf("Error queueing GetListResp: returned %d\n", ret);
+                exit(1);
+            }
+            // drop the incoming deserialized request
+            GetListReq_free(c->cf_req);
         }
 
         // drop the copy context.
         CopyContext_free(c->cc);
-        // drop the incoming deserialized request
-        GetMReq_free(c->cf_req);
         // drop the incoming received packet
         ReceivedPkt_free(pkts[j]);
 

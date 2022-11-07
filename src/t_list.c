@@ -28,6 +28,7 @@
  */
 
 #include "server.h"
+#include "kv_sga_cornflakes.h"
 
 /*-----------------------------------------------------------------------------
  * List API
@@ -425,6 +426,65 @@ void listPopRangeAndReplyWithKey(client *c, robj *o, robj *key, int where, long 
  * indexes as multi-bulk, with support for negative indexes. Note that start
  * must be less than end or an empty array is returned. When the reverse
  * argument is set to a non-zero value, the reply is reversed so that elements
+ * are returned from end to start. 
+ * Modified for Cornflakes serialization. */
+void addListRangeReplyCf(client *c, robj *o, long start, long end, int reverse) {
+    void *vals = NULL;
+    void *val = NULL;
+    long rangelen, llen = listTypeLength(o);
+
+    /* Convert negative indexes. */
+    if (start < 0) start = llen+start;
+    if (end < 0) end = llen+end;
+    if (start < 0) start = 0;
+
+    /* Invariant: start >= 0, so this test will be true when end < 0.
+     * The range is empty when start > end or start >= length. */
+    if (start > end || start >= llen) {
+        // addReply(c,shared.emptyarray);
+        return;
+    }
+    if (end >= llen) end = llen-1;
+    rangelen = (end-start)+1;
+    // initialize empty list
+    GetListResp_init_val_list(c->cf_res, rangelen, c->arena);
+    GetListResp_get_mut_val_list(c->cf_res, &vals);
+
+    /* Return the result in form of a multi-bulk reply */
+    // addReplyArrayLen(c,rangelen);
+    if (o->encoding == OBJ_ENCODING_QUICKLIST) {
+        int from = reverse ? end : start;
+        int direction = reverse ? LIST_HEAD : LIST_TAIL;
+        listTypeIterator *iter = listTypeInitIterator(o,from,direction);
+
+        while(rangelen--) {
+            listTypeEntry entry;
+            serverAssert(listTypeNext(iter, &entry)); /* fail on corrupt data */
+            quicklistEntry *qe = &entry.entry;
+            if (qe->value) {
+                if (CFBytes_new(qe->value, qe->sz, c->datapath, c->cc, &val) != 0) {
+                    printf("Error allocating CFBytes for pointer %p, size %lu.\n", qe->value, qe->sz);
+                    exit(1);
+                }
+                VariableList_CFBytes_append(vals, val);
+                // addReplyBulkCBuffer(c,qe->value,qe->sz);
+            } else {
+                // NOT IMPLEMENTED
+                printf("Warning: codepath not implemented to add longs to lists.\n");
+                exit(1);
+                // addReplyBulkLongLong(c,qe->longval);
+            }
+        }
+        listTypeReleaseIterator(iter);
+    } else {
+        serverPanic("Unknown list encoding");
+    }
+}
+
+/* A helper for replying with a list's range between the inclusive start and end
+ * indexes as multi-bulk, with support for negative indexes. Note that start
+ * must be less than end or an empty array is returned. When the reverse
+ * argument is set to a non-zero value, the reply is reversed so that elements
  * are returned from end to start. */
 void addListRangeReply(client *c, robj *o, long start, long end, int reverse) {
     long rangelen, llen = listTypeLength(o);
@@ -590,16 +650,41 @@ void rpopCommand(client *c) {
 
 /* LRANGE <key> <start> <stop> */
 void lrangeCommand(client *c) {
-    robj *o;
-    long start, end;
+    if (c->use_cornflakes) {
+        robj *o;
+        int64_t start = 0;
+        int64_t end = 0;
+        void *key;
+        const unsigned char *key_buffer;
+        size_t key_buffer_len;
+        GetListReq_get_range_start(c->cf_req, &start);
+        GetListReq_get_range_end(c->cf_req, &end);
+        GetListReq_get_key(c->cf_req, &key);
+        CFString_unpack(key, &key_buffer, &key_buffer_len);
+        // TODO: where do the argv's in the client command get populated? Does
+        // a createStringObject also happen?
+        robj *k = createStringObject((char *)key_buffer, key_buffer_len);
+        o = lookupKeyRead(c->db, k);
+        if (o == NULL) {
+            printf("Didn't find value for key.\n");
+            exit(1);
+        } else if (o->type != OBJ_LIST) {
+            printf("Type is: %d, not obj_list\n", o->type);
+            exit(1);
+        }
+        addListRangeReplyCf(c, o, start, end, 0);
+    } else {
+        robj *o;
+        long start, end;
 
-    if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != C_OK) ||
-        (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != C_OK)) return;
+        if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != C_OK) ||
+            (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != C_OK)) return;
 
-    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptyarray)) == NULL
-         || checkType(c,o,OBJ_LIST)) return;
+        if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.emptyarray)) == NULL
+            || checkType(c,o,OBJ_LIST)) return;
 
-    addListRangeReply(c,o,start,end,0);
+        addListRangeReply(c,o,start,end,0);
+    }
 }
 
 /* LTRIM <key> <start> <stop> */

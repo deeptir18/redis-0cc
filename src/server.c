@@ -2667,9 +2667,11 @@ void initServer(void) {
     if (num_keys_str != NULL) {
         num_keys = (size_t)(strtol(num_keys_str, &ptr, 10));
     }
-    if (value_size_str != NULL) {
+    if (value_size_str == NULL) {
         value_size_str = "UniformOverSizes-1024";
     }
+
+    printf("SETTING VALUESIZE: %s\n", value_size_str);
 
     const char *server_db_trace = getenv("YCSB_TRACE");
     if (server_db_trace != NULL) {
@@ -7216,13 +7218,15 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         // TODO: is this copy necessary or fair?
         c->querybuf = sdsnewlen(data + 4, data_len - 4);
         c->querybuf_peak = max(c->querybuf_peak, sdslen(c->querybuf));
+        c->qb_pos = 0;
+        c->bufpos = 0;
         // for Redis serialization, argc needs to be reset before calling
         // processMultiBulkBuffer
         c->argc = 0;
 
         // Parse argc and argv from the multibulk buffer.
         if (processMultibulkBuffer(c) != C_OK) {
-            printf("Error processing multibulk buffer\n");
+            printf("Error processing multibulk buffer: processing packet # %lu\n", j);
             exit(1);
         }
 
@@ -7241,12 +7245,14 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         // When ready to send...
         ReceivedPkt_msg_id(pkts[j], &msg_id);
         ReceivedPkt_conn_id(pkts[j], &conn_id);
+        //printf("After processing, buf pos is %lu\n", c->bufpos);
         if (Mlx5Connection_queue_single_buffer_with_copy(s->datapath,
                 msg_id, conn_id, (uint8_t*)c->buf, c->bufpos, j == n-1) != 0) {
             printf("Error queueing single buffer\n");
             exit(1);
         }
 
+        // TODO: should free the vec of received packets as well
         ReceivedPkt_free(pkts[j]);
 
         processed++;

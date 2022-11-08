@@ -351,7 +351,7 @@ int getGenericCommand(client *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL)
         return C_OK;
 
-    if (checkType(c,o,OBJ_STRING)) {
+    if (o->type != OBJ_STRING && o->type != OBJ_ZERO_COPY_STRING) {
         return C_ERR;
     }
 

@@ -2652,6 +2652,7 @@ void initServer(void) {
         Mlx5Connection_set_inline_mode(server.datapath, 2);
     }
 
+    const char *ready_file = getenv("READY_FILE");
 
     // DB ycsb options
     const char *num_values_str = getenv("NUM_VALUES");
@@ -2747,6 +2748,18 @@ void initServer(void) {
     }
 
     Mlx5_global_debug_init();
+
+    // write to ready file
+    if (ready_file != NULL) {
+        FILE *fptr;
+        fptr = fopen(ready_file, "w");
+        if (fptr == NULL) {
+            printf("Error opening ready file");
+            exit(1);
+        }
+        fprintf(fptr, "ready\n");
+        fclose(fptr);
+    }
     /* Load rust backing db and then redis db if trace is not null. */
 
     /* Create an event handler for accepting new connections in TCP and Unix

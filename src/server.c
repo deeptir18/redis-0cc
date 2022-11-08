@@ -2607,25 +2607,26 @@ void initServer(void) {
      * using Cornflakes serialization. */
     const char *serialization = getenv("SERIALIZATION");
     if (serialization == NULL) {
-        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes0c', "
-           "'cornflakes1c', or 'redis'\n");
+        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes-dynamic', "
+           "'cornflakes1c-dynamic', or 'redis'\n");
         exit(1);
-    } else if (strcmp(serialization, "cornflakes0c") == 0) {
+    } else if (strcmp(serialization, "cornflakes-dynamic") == 0) {
         server.use_cornflakes = true;
         const char *copy_threshold_str = getenv("COPY_THRESHOLD");
-        size_t copy_threshold = 256;
+        size_t copy_threshold = 0;
         char *ptr = NULL;
         if (copy_threshold_str != NULL) {
             copy_threshold=strtol(copy_threshold_str, &ptr, 10);
         }
         Mlx5Connection_set_copying_threshold(server.datapath, copy_threshold);
+        /// bump should probably be large
         Bump_with_capacity(
             32,   // batch_size
             9216, // max_packet_size (jumbo frames turned on)
             64,   // max_entries
             &server.arena
         );
-    } else if (strcmp(serialization, "cornflakes1c") == 0) {
+    } else if (strcmp(serialization, "cornflakes1c-dynamic") == 0) {
         server.use_cornflakes = true;
         Mlx5Connection_set_copying_threshold(server.datapath, SIZE_MAX);
         Bump_with_capacity(
@@ -2638,7 +2639,7 @@ void initServer(void) {
         server.use_cornflakes = false;
         server.arena = NULL;
     } else {
-        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes' or 'redis'\n");
+        printf("ERROR: Set SERIALIZATION envvar as 'cornflakes1c-dynamic' or 'cornflakes-dynamic' or 'redis'\n");
         exit(1);
     }
 

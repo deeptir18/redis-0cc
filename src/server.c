@@ -71,6 +71,68 @@
 #include <sys/sysctl.h>
 #endif
 
+#define __TIMERS__ 1
+#ifdef __TIMERS__
+typedef struct Latency_Dist_t
+{
+    uint64_t min, max;
+    uint64_t latency_sum;
+    uint64_t total_count;
+    float moving_avg;
+    uint64_t *latencies;
+    size_t allocated;
+} Latency_Dist_t;
+
+int add_latency(Latency_Dist_t *dist, uint64_t latency) {
+    if (dist->total_count < dist->allocated) {
+        dist->latencies[dist->total_count] = latency;
+    }
+    dist->total_count++;
+    dist->latency_sum += latency;
+    if (latency < dist->min) {
+        dist->min = latency;
+    }
+
+    if (latency > dist->max) {
+        dist->max = latency;
+    }
+
+    // calculate moving avg
+    dist->moving_avg = dist->moving_avg * ((float)(dist->total_count - 1)/(float)dist->total_count) + ((float)(latency) / (float)(dist->total_count));
+    return 0;
+}
+
+int cmpfunc(const void * a, const void *b) {
+    const uint64_t *a_ptr = (const uint64_t *)a;
+    const uint64_t *b_ptr = (const uint64_t *)b;
+    return (int)(*a_ptr - *b_ptr);
+}
+
+int dump_debug_latencies(char* dist_name, Latency_Dist_t *dist) {
+    if (dist->total_count == 0) {
+        return 0;
+    }
+    printf("%s\n", dist_name);
+    size_t num_sorted_latencies;
+    if (dist->total_count > dist->allocated) {
+        num_sorted_latencies = dist->allocated;
+    } else {
+        num_sorted_latencies = dist->total_count;
+    }
+
+    qsort(dist->latencies, num_sorted_latencies, sizeof(uint64_t), cmpfunc);
+    uint64_t avg_latency = dist->latency_sum / dist->total_count;
+    printf("Median index: %lu, p99 index: %lu, p999: %lu, total: %lu\n", (size_t)((float)num_sorted_latencies * 0.50), (size_t)((float)num_sorted_latencies * 0.99), (size_t)((float)num_sorted_latencies * 0.999), num_sorted_latencies);
+    uint64_t median = dist->latencies[(size_t)((float)num_sorted_latencies * 0.50)];
+    uint64_t p99 = dist->latencies[(size_t)((float)num_sorted_latencies * 0.99)];
+    uint64_t p999 = dist->latencies[(size_t)((float)num_sorted_latencies * 0.999)];
+    printf("Min\t%lu\tMax\t%lu\tAvg\t%lu\tSum\t%lu\n", dist->min, dist->max,
+        avg_latency, dist->latency_sum);
+    printf("Median\t%lu\tp99\t%lu\tp999\t%lu\n\n", median, p99, p999);
+    return 0;
+}
+#endif
+
 /* Our shared "common" objects */
 
 struct sharedObjectsStruct shared;
@@ -80,6 +142,19 @@ struct sharedObjectsStruct shared;
  * at runtime to avoid strange compiler optimizations. */
 
 double R_Zero, R_PosInf, R_NegInf, R_Nan;
+
+#ifdef __TIMERS__
+/*================================= Timers ================================== */
+#define ALLOCATED 10000
+static Latency_Dist_t client_alloc_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t copy_context_alloc_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t parse_msg_type_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t deserialize_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t process_req_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t serialize_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t packet_free_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t deallocation_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+#endif
 
 /*================================= Globals ================================= */
 
@@ -2602,6 +2677,18 @@ void initServer(void) {
         serverLog(LL_NOTICE, "Successfully initialized MLX5 connection.");
     }
     Mlx5Connection_set_inline_mode(server.datapath, 0);
+
+#ifdef __TIMERS__
+    /* Timers */
+    client_alloc_dist.latencies = malloc(client_alloc_dist.allocated * sizeof(uint64_t));
+    copy_context_alloc_dist.latencies = malloc(copy_context_alloc_dist.allocated * sizeof(uint64_t));
+    parse_msg_type_dist.latencies = malloc(parse_msg_type_dist.allocated * sizeof(uint64_t));
+    deserialize_dist.latencies = malloc(deserialize_dist.allocated * sizeof(uint64_t));
+    process_req_dist.latencies = malloc(process_req_dist.allocated * sizeof(uint64_t));
+    serialize_dist.latencies = malloc(serialize_dist.allocated * sizeof(uint64_t));
+    packet_free_dist.latencies = malloc(packet_free_dist.allocated * sizeof(uint64_t));
+    deallocation_dist.latencies = malloc(deallocation_dist.allocated * sizeof(uint64_t));
+#endif
 
     /* Determine the serialization type and initialize the bumpalo arena if
      * using Cornflakes serialization. */
@@ -6398,6 +6485,15 @@ static void sigShutdownHandler(int sig) {
     switch (sig) {
     case SIGINT:
         msg = "Received SIGINT scheduling shutdown...";
+#ifdef __TIMERS__
+        dump_debug_latencies("client_alloc_dist", &client_alloc_dist);
+        dump_debug_latencies("copy_context_alloc_dist", &copy_context_alloc_dist);
+        dump_debug_latencies("parse_msg_type_dist", &parse_msg_type_dist);
+        dump_debug_latencies("deserialize_dist", &deserialize_dist);
+        dump_debug_latencies("process_req_dist", &process_req_dist);
+        dump_debug_latencies("serialize_dist", &serialize_dist);
+        dump_debug_latencies("packet_free_dist", &packet_free_dist);
+#endif
         break;
     case SIGTERM:
         msg = "Received SIGTERM scheduling shutdown...";
@@ -7216,9 +7312,18 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
     uint32_t msg_id;
     size_t conn_id, data_len;
     const unsigned char *data;
+#ifdef __TIMERS__
+    clock_t t1 = clock();
+#endif
     struct client *c = createClient(NULL);
     c->use_cornflakes = false;
+#ifdef __TIMERS__
+    add_latency(&client_alloc_dist, clock() - t1);
+#endif
     for (size_t j = 0; j < n; j++) {
+#ifdef __TIMERS__
+        t1 = clock();
+#endif
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
 
@@ -7243,7 +7348,12 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
             printf("Error processing multibulk buffer: processing packet # %lu\n", j);
             exit(1);
         }
-
+#ifdef __TIMERS__
+        // skip copy_context_alloc_dist
+        // skip parse_msg_type_dist
+        add_latency(&deserialize_dist, clock() - t1);
+        t1 = clock();
+#endif
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
 
@@ -7252,6 +7362,10 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         // a static buffer c->buf with length c->bufpos via _addReplyToBuffer().
         c->cmd = dictFetchValue(s->commands, c->argv[0]->ptr);
         c->cmd->proc(c);
+#ifdef __TIMERS__
+        add_latency(&process_req_dist, clock() - t1);
+        t1 = clock();
+#endif
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 3: Serialize and send the response.
@@ -7265,13 +7379,26 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
             printf("Error queueing single buffer\n");
             exit(1);
         }
+#ifdef __TIMERS__
+        add_latency(&serialize_dist, clock() - t1);
+        t1 = clock();
+#endif
 
         // TODO: should free the vec of received packets as well
         ReceivedPkt_free(pkts[j]);
+#ifdef __TIMERS__
+        add_latency(&packet_free_dist, clock() - t1);
+#endif
 
         processed++;
     }
+#ifdef __TIMERS__
+    t1 = clock();
+#endif
     freeClient(c);
+#ifdef __TIMERS__
+    add_latency(&deallocation_dist, clock() - t1);
+#endif
 
     return processed;
 }
@@ -7281,6 +7408,9 @@ int cornflakesProcessEventsCf(struct redisServer *s,
                               void **pkts) {
     int processed = 0;
     // TODO: does this work if n>1?
+#ifdef __TIMERS__
+    clock_t t1 = clock();
+#endif
     struct client *c = createClient(NULL);
     c->use_cornflakes = true;
     c->datapath = s->datapath;
@@ -7289,15 +7419,28 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     uint16_t msg_size;
     uint32_t msg_id;
     size_t conn_id;
+#ifdef __TIMERS__
+    add_latency(&client_alloc_dist, clock() - t1);
+#endif
     for (size_t j = 0; j < n; j++) {
-
+#ifdef __TIMERS__
+        t1 = clock();
+#endif
         if (CopyContext_new(s->arena, s->datapath, &c->cc) != 0) {
             printf("Error allocating CopyContext\n");
             exit(1);
         }
+#ifdef __TIMERS__
+        add_latency(&copy_context_alloc_dist, clock() - t1);
+        t1 = clock();
+#endif
         // Read first four bytes of packet to determine message type.
         ReceivedPkt_msg_type(pkts[j], &msg_size, &msg_type);
         assert(msg_type == 2 || msg_type == 0 || msg_type == 4);
+#ifdef __TIMERS__
+        add_latency(&parse_msg_type_dist, clock() - t1);
+        t1 = clock();
+#endif
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
@@ -7336,6 +7479,10 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             GetListReq_get_id(c->cf_req, &msg_id);
             GetListResp_set_id(c->cf_res, msg_id);
         }
+#ifdef __TIMERS__
+        add_latency(&deserialize_dist, clock() - t1);
+        t1 = clock();
+#endif
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
@@ -7352,6 +7499,10 @@ int cornflakesProcessEventsCf(struct redisServer *s,
                     createObject(OBJ_STRING, sdsnew("LRANGE"))->ptr);  
             c->cmd->proc(c);
         }
+#ifdef __TIMERS__
+        add_latency(&process_req_dist, clock() - t1);
+        t1 = clock();
+#endif
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 3: Serialize and send the response.
@@ -7385,17 +7536,28 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             // drop the incoming deserialized request
             GetListReq_free(c->cf_req);
         }
-
+#ifdef __TIMERS__
+        add_latency(&serialize_dist, clock() - t1);
+        t1 = clock();
+#endif
         // drop the copy context.
         CopyContext_free(c->cc);
         // drop the incoming received packet
         ReceivedPkt_free(pkts[j]);
-
+#ifdef __TIMERS__
+        add_latency(&packet_free_dist, clock() - t1);
+#endif
 
         processed++;
     }
+#ifdef __TIMERS__
+    t1 = clock();
+#endif
     Bump_reset(s->arena);
     freeClient(c);
+#ifdef __TIMERS__
+    add_latency(&deallocation_dist, clock() - t1);
+#endif
 
     return processed;
 }

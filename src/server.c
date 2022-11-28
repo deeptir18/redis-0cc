@@ -123,7 +123,7 @@ int dump_debug_latencies(char* dist_name, Latency_Dist_t *dist, long long total)
 
     qsort(dist->latencies, num_sorted_latencies, sizeof(uint64_t), cmpfunc);
     uint64_t avg_latency = dist->latency_sum / dist->total_count;
-    printf("Median index: %lu, p99 index: %lu, p999: %lu, total: %lu\n", (size_t)((float)num_sorted_latencies * 0.50), (size_t)((float)num_sorted_latencies * 0.99), (size_t)((float)num_sorted_latencies * 0.999), num_sorted_latencies);
+    // printf("Median index: %lu, p99 index: %lu, p999: %lu, total: %lu\n", (size_t)((float)num_sorted_latencies * 0.50), (size_t)((float)num_sorted_latencies * 0.99), (size_t)((float)num_sorted_latencies * 0.999), num_sorted_latencies);
     uint64_t median = dist->latencies[(size_t)((float)num_sorted_latencies * 0.50)];
     uint64_t p99 = dist->latencies[(size_t)((float)num_sorted_latencies * 0.99)];
     uint64_t p999 = dist->latencies[(size_t)((float)num_sorted_latencies * 0.999)];
@@ -149,8 +149,8 @@ double R_Zero, R_PosInf, R_NegInf, R_Nan;
 /*================================= Timers ================================== */
 #define ALLOCATED 10000
 static Latency_Dist_t client_alloc_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
-static Latency_Dist_t copy_context_alloc_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
-static Latency_Dist_t parse_msg_type_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t step1_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
+static Latency_Dist_t step2_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
 static Latency_Dist_t deserialize_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
 static Latency_Dist_t process_req_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
 static Latency_Dist_t serialize_dist = { .min = LONG_MAX, .max = 0, .total_count = 0, .latency_sum = 0, .allocated = ALLOCATED };
@@ -2683,8 +2683,8 @@ void initServer(void) {
 #ifdef __TIMERS__
     /* Timers */
     client_alloc_dist.latencies = malloc(client_alloc_dist.allocated * sizeof(uint64_t));
-    copy_context_alloc_dist.latencies = malloc(copy_context_alloc_dist.allocated * sizeof(uint64_t));
-    parse_msg_type_dist.latencies = malloc(parse_msg_type_dist.allocated * sizeof(uint64_t));
+    step1_dist.latencies = malloc(step1_dist.allocated * sizeof(uint64_t));
+    step2_dist.latencies = malloc(step2_dist.allocated * sizeof(uint64_t));
     deserialize_dist.latencies = malloc(deserialize_dist.allocated * sizeof(uint64_t));
     process_req_dist.latencies = malloc(process_req_dist.allocated * sizeof(uint64_t));
     serialize_dist.latencies = malloc(serialize_dist.allocated * sizeof(uint64_t));
@@ -2738,6 +2738,10 @@ void initServer(void) {
     if (server.use_cornflakes) {
         server.c->datapath = server.datapath;
         server.c->arena = server.arena;
+        if (CopyContext_new(server.arena, server.datapath, &server.c->cc) != 0) {
+            printf("Error allocating CopyContext\n");
+            exit(1);
+        }
     }
 
     const char *inline_mode = getenv("INLINE_MODE");
@@ -6497,20 +6501,20 @@ static void sigShutdownHandler(int sig) {
         msg = "Received SIGINT scheduling shutdown...";
 #ifdef __TIMERS__
         long long total = client_alloc_dist.latency_sum
-            + copy_context_alloc_dist.latency_sum
-            + parse_msg_type_dist.latency_sum
+            + step1_dist.latency_sum
+            + step2_dist.latency_sum
             + deserialize_dist.latency_sum
             + process_req_dist.latency_sum
             + serialize_dist.latency_sum
             + packet_free_dist.latency_sum;
         dump_debug_latencies("client_alloc_dist", &client_alloc_dist, total);
-        dump_debug_latencies("copy_context_alloc_dist", &copy_context_alloc_dist, total);
-        dump_debug_latencies("parse_msg_type_dist", &parse_msg_type_dist, total);
         dump_debug_latencies("deserialize_dist", &deserialize_dist, total);
         dump_debug_latencies("process_req_dist", &process_req_dist, total);
+        dump_debug_latencies("step1_dist", &step1_dist, total);
+        dump_debug_latencies("step2_dist", &step2_dist, total);
         dump_debug_latencies("serialize_dist", &serialize_dist, total);
         dump_debug_latencies("packet_free_dist", &packet_free_dist, total);
-        printf("Total = %ld\n", total);
+        printf("Total = %lld\n", total);
 #endif
         break;
     case SIGTERM:
@@ -7327,6 +7331,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
                                  void **pkts) {
 #ifdef __TIMERS__
     clock_t t1 = clock();
+    clock_t t2;
 #endif
     int processed = 0;
     // TODO: does this work if n>1?
@@ -7366,8 +7371,8 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
             exit(1);
         }
 #ifdef __TIMERS__
-        // skip copy_context_alloc_dist
-        // skip parse_msg_type_dist
+        // skip step1_dist
+        // skip step2_dist
         add_latency(&deserialize_dist, clock() - t1);
         t1 = clock();
 #endif
@@ -7377,8 +7382,18 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         // Skip the ACL checks in processCommand() and populate the response
         // buffer by executing the command. The command eventually populates
         // a static buffer c->buf with length c->bufpos via _addReplyToBuffer().
+#ifdef __TIMERS__
+        t2 = clock();
+#endif
         c->cmd = dictFetchValue(s->commands, c->argv[0]->ptr);
+#ifdef __TIMERS__
+        add_latency(&step1_dist, clock() - t2);
+        t2 = clock();
+#endif
         c->cmd->proc(c);
+#ifdef __TIMERS__
+        add_latency(&step2_dist, clock() - t2);
+#endif
 #ifdef __TIMERS__
         add_latency(&process_req_dist, clock() - t1);
         t1 = clock();
@@ -7419,6 +7434,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
                               void **pkts) {
 #ifdef __TIMERS__
     clock_t t1 = clock();
+    clock_t t2;
 #endif
     int processed = 0;
     // TODO: does this work if n>1?
@@ -7426,7 +7442,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     uint16_t msg_type;
     uint16_t msg_size;
     uint32_t msg_id;
-    size_t conn_id;
+    size_t conn_id, data_len;
 #ifdef __TIMERS__
     add_latency(&client_alloc_dist, clock() - t1);
 #endif
@@ -7434,21 +7450,9 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 #ifdef __TIMERS__
         t1 = clock();
 #endif
-        if (CopyContext_new(s->arena, s->datapath, &c->cc) != 0) {
-            printf("Error allocating CopyContext\n");
-            exit(1);
-        }
-#ifdef __TIMERS__
-        add_latency(&copy_context_alloc_dist, clock() - t1);
-        t1 = clock();
-#endif
         // Read first four bytes of packet to determine message type.
         ReceivedPkt_msg_type(pkts[j], &msg_size, &msg_type);
         assert(msg_type == 2 || msg_type == 0 || msg_type == 4);
-#ifdef __TIMERS__
-        add_latency(&parse_msg_type_dist, clock() - t1);
-        t1 = clock();
-#endif
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 1: Deserialize the incoming request.
@@ -7494,18 +7498,42 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
+#ifdef __TIMERS__
+        t2 = clock();
+#endif
         if (msg_type == 0) {
             c->cmd = dictFetchValue(s->commands,
                     createObject(OBJ_STRING, sdsnew("GET"))->ptr);
+#ifdef __TIMERS__
+            add_latency(&step1_dist, clock() - t2);
+            t2 = clock();
+#endif
             c->cmd->proc(c);
+#ifdef __TIMERS__
+            add_latency(&step2_dist, clock() - t2);
+#endif
         } else if (msg_type == 2) {
             c->cmd = dictFetchValue(s->commands,
                 createObject(OBJ_STRING,sdsnew("MGET"))->ptr);
+#ifdef __TIMERS__
+            add_latency(&step1_dist, clock() - t2);
+            t2 = clock();
+#endif
             c->cmd->proc(c);
+#ifdef __TIMERS__
+            add_latency(&step2_dist, clock() - t2);
+#endif
         } else if (msg_type == 4) {
             c->cmd = dictFetchValue(s->commands,
                     createObject(OBJ_STRING, sdsnew("LRANGE"))->ptr);  
+#ifdef __TIMERS__
+            add_latency(&step1_dist, clock() - t2);
+            t2 = clock();
+#endif
             c->cmd->proc(c);
+#ifdef __TIMERS__
+            add_latency(&step2_dist, clock() - t2);
+#endif
         }
 #ifdef __TIMERS__
         add_latency(&process_req_dist, clock() - t1);
@@ -7548,8 +7576,11 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         add_latency(&serialize_dist, clock() - t1);
         t1 = clock();
 #endif
-        // drop the copy context.
-        CopyContext_free(c->cc);
+        // reset the copy context if used.
+        CopyContext_data_len(c->cc, &data_len);
+        if (data_len != 0) {
+            CopyContext_reset(c->cc);
+        }
         // drop the incoming received packet
         ReceivedPkt_free(pkts[j]);
 #ifdef __TIMERS__

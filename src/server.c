@@ -108,7 +108,8 @@ int cmpfunc(const void * a, const void *b) {
     return (int)(*a_ptr - *b_ptr);
 }
 
-int dump_debug_latencies(char* dist_name, Latency_Dist_t *dist) {
+int dump_debug_latencies(char* dist_name, Latency_Dist_t *dist, long long total)
+{
     if (dist->total_count == 0) {
         return 0;
     }
@@ -128,7 +129,8 @@ int dump_debug_latencies(char* dist_name, Latency_Dist_t *dist) {
     uint64_t p999 = dist->latencies[(size_t)((float)num_sorted_latencies * 0.999)];
     printf("Min\t%lu\tMax\t%lu\tAvg\t%lu\tSum\t%lu\n", dist->min, dist->max,
         avg_latency, dist->latency_sum);
-    printf("Median\t%lu\tp99\t%lu\tp999\t%lu\n\n", median, p99, p999);
+    printf("Median\t%lu\tp99\t%lu\tp999\t%lu\t%\t%.2f\n\n", median, p99, p999,
+        100.0 * dist->latency_sum / total);
     return 0;
 }
 #endif
@@ -6486,13 +6488,21 @@ static void sigShutdownHandler(int sig) {
     case SIGINT:
         msg = "Received SIGINT scheduling shutdown...";
 #ifdef __TIMERS__
-        dump_debug_latencies("client_alloc_dist", &client_alloc_dist);
-        dump_debug_latencies("copy_context_alloc_dist", &copy_context_alloc_dist);
-        dump_debug_latencies("parse_msg_type_dist", &parse_msg_type_dist);
-        dump_debug_latencies("deserialize_dist", &deserialize_dist);
-        dump_debug_latencies("process_req_dist", &process_req_dist);
-        dump_debug_latencies("serialize_dist", &serialize_dist);
-        dump_debug_latencies("packet_free_dist", &packet_free_dist);
+        long long total = client_alloc_dist.latency_sum
+            + copy_context_alloc_dist.latency_sum
+            + parse_msg_type_dist.latency_sum
+            + deserialize_dist.latency_sum
+            + process_req_dist.latency_sum
+            + serialize_dist.latency_sum
+            + packet_free_dist.latency_sum;
+        dump_debug_latencies("client_alloc_dist", &client_alloc_dist, total);
+        dump_debug_latencies("copy_context_alloc_dist", &copy_context_alloc_dist, total);
+        dump_debug_latencies("parse_msg_type_dist", &parse_msg_type_dist, total);
+        dump_debug_latencies("deserialize_dist", &deserialize_dist, total);
+        dump_debug_latencies("process_req_dist", &process_req_dist, total);
+        dump_debug_latencies("serialize_dist", &serialize_dist, total);
+        dump_debug_latencies("packet_free_dist", &packet_free_dist, total);
+        printf("Total = %ld\n", total);
 #endif
         break;
     case SIGTERM:
@@ -7307,14 +7317,14 @@ int main(int argc, char **argv) {
 int cornflakesProcessEventsRedis(struct redisServer *s,
                                  size_t n,
                                  void **pkts) {
+#ifdef __TIMERS__
+    clock_t t1 = clock();
+#endif
     int processed = 0;
     // TODO: does this work if n>1?
     uint32_t msg_id;
     size_t conn_id, data_len;
     const unsigned char *data;
-#ifdef __TIMERS__
-    clock_t t1 = clock();
-#endif
     struct client *c = createClient(NULL);
     c->use_cornflakes = false;
 #ifdef __TIMERS__
@@ -7406,11 +7416,11 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
 int cornflakesProcessEventsCf(struct redisServer *s,
                               size_t n,
                               void **pkts) {
-    int processed = 0;
-    // TODO: does this work if n>1?
 #ifdef __TIMERS__
     clock_t t1 = clock();
 #endif
+    int processed = 0;
+    // TODO: does this work if n>1?
     struct client *c = createClient(NULL);
     c->use_cornflakes = true;
     c->datapath = s->datapath;
@@ -7471,7 +7481,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         } else if (msg_type == 4) {
             GetListReq_new_in(s->arena, &c->cf_req);
             if (GetListReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
-                printf("Error deserializing GetReq\n");
+                printf("Error deserializing GetListReq\n");
                 exit(1);
             }
 

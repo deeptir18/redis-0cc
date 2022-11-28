@@ -2732,6 +2732,14 @@ void initServer(void) {
         exit(1);
     }
 
+    /* Redis client */
+    server.c = createClient(NULL);
+    server.c->use_cornflakes = server.use_cornflakes;
+    if (server.use_cornflakes) {
+        server.c->datapath = server.datapath;
+        server.c->arena = server.arena;
+    }
+
     const char *inline_mode = getenv("INLINE_MODE");
 
     if (strcmp(inline_mode, "nothing") == 0) {
@@ -7325,8 +7333,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
     uint32_t msg_id;
     size_t conn_id, data_len;
     const unsigned char *data;
-    struct client *c = createClient(NULL);
-    c->use_cornflakes = false;
+    struct client *c = s->c;
 #ifdef __TIMERS__
     add_latency(&client_alloc_dist, clock() - t1);
 #endif
@@ -7402,13 +7409,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
 
         processed++;
     }
-#ifdef __TIMERS__
-    t1 = clock();
-#endif
-    freeClient(c);
-#ifdef __TIMERS__
-    add_latency(&deallocation_dist, clock() - t1);
-#endif
+    // skip deallocation_dist
 
     return processed;
 }
@@ -7421,10 +7422,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 #endif
     int processed = 0;
     // TODO: does this work if n>1?
-    struct client *c = createClient(NULL);
-    c->use_cornflakes = true;
-    c->datapath = s->datapath;
-    c->arena = s->arena;
+    struct client *c = s->c;
     uint16_t msg_type;
     uint16_t msg_size;
     uint32_t msg_id;
@@ -7564,7 +7562,6 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     t1 = clock();
 #endif
     Bump_reset(s->arena);
-    freeClient(c);
 #ifdef __TIMERS__
     add_latency(&deallocation_dist, clock() - t1);
 #endif

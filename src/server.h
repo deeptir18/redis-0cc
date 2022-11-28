@@ -1464,8 +1464,8 @@ struct redisServer {
     void *datapath;             /* MLX5 connection */
     void *rust_backing_db;      /* Backing Rust DB for single kv pairs */
     void *rust_backing_list_db; /* Backing Rust DB for k->list pairs */
-
     void *arena;                /* bumpalo::Bump */
+    struct client *c;           /* Redis client */
 
     /* General */
     pid_t pid;                  /* Main process pid. */

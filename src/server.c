@@ -6509,17 +6509,16 @@ static void sigShutdownHandler(int sig) {
         msg = "Received SIGINT scheduling shutdown...";
 #ifdef __TIMERS__
         long long total = client_alloc_dist.latency_sum
+            + deserialize_dist.latency_sum
             + step1_dist.latency_sum
             + step2_dist.latency_sum
-            + deserialize_dist.latency_sum
-            + process_req_dist.latency_sum
             + serialize_dist.latency_sum
             + packet_free_dist.latency_sum;
         dump_debug_latencies("client_alloc_dist", &client_alloc_dist, total);
         dump_debug_latencies("deserialize_dist", &deserialize_dist, total);
-        dump_debug_latencies("process_req_dist", &process_req_dist, total);
-        dump_debug_latencies("step1_dist", &step1_dist, total);
-        dump_debug_latencies("step2_dist", &step2_dist, total);
+        // dump_debug_latencies("process_req_dist", &process_req_dist, total);
+        dump_debug_latencies("process_req1_dist", &step1_dist, total);
+        dump_debug_latencies("process_req2_dist", &step2_dist, total);
         dump_debug_latencies("serialize_dist", &serialize_dist, total);
         dump_debug_latencies("packet_free_dist", &packet_free_dist, total);
         printf("Total = %lld\n", total);
@@ -7379,10 +7378,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
             exit(1);
         }
 #ifdef __TIMERS__
-        // skip step1_dist
-        // skip step2_dist
         add_latency(&deserialize_dist, clock() - t1);
-        t1 = clock();
 #endif
         ////////////////////////////////////////////////////////////////////////
         // STEP 2: Process the request and populate the outgoing buffer.
@@ -7401,9 +7397,6 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
         c->cmd->proc(c);
 #ifdef __TIMERS__
         add_latency(&step2_dist, clock() - t2);
-#endif
-#ifdef __TIMERS__
-        add_latency(&process_req_dist, clock() - t1);
         t1 = clock();
 #endif
 
@@ -7501,7 +7494,6 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         }
 #ifdef __TIMERS__
         add_latency(&deserialize_dist, clock() - t1);
-        t1 = clock();
 #endif
 
         ////////////////////////////////////////////////////////////////////////
@@ -7541,7 +7533,6 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 #endif
         }
 #ifdef __TIMERS__
-        add_latency(&process_req_dist, clock() - t1);
         t1 = clock();
 #endif
 

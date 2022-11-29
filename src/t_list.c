@@ -58,6 +58,17 @@ void listTypePush(robj *subject, robj *value, int where) {
     }
 }
 
+/* Like listTypePush but for zero-copy string objects, and ensures that the
+ * string element does not get re-encoded. */
+void listTypePushZeroCopy(robj *subject, robj *value, int where) {
+    serverAssert(subject->encoding == OBJ_ENCODING_QUICKLIST);
+    serverAssert(rawStringObject(value));
+    serverAssert(where != LIST_HEAD);
+    void *ptr = rawstringpointer((rawstring *)value->ptr);
+    const size_t sz = rawstringlen((rawstring *)value->ptr);
+    quicklistPushTailZeroCopy(subject->ptr, ptr, sz);
+}
+
 void *listPopSaver(unsigned char *data, size_t sz) {
     return createStringObject((char*)data,sz);
 }
@@ -453,17 +464,13 @@ void addListRangeReplyCf(client *c, robj *o, long start, long end, int reverse) 
     /* Return the result in form of a multi-bulk reply */
     // addReplyArrayLen(c,rangelen);
     if (o->encoding == OBJ_ENCODING_QUICKLIST) {
-        int from = reverse ? end : start;
-        int direction = reverse ? LIST_HEAD : LIST_TAIL;
-        listTypeIterator *iter = listTypeInitIterator(o,from,direction);
+        quicklist *quicklist = o->ptr;
+        quicklistNode *node = reverse ? quicklist->tail : quicklist->head;
 
-        while(rangelen--) {
-            listTypeEntry entry;
-            serverAssert(listTypeNext(iter, &entry)); /* fail on corrupt data */
-            quicklistEntry *qe = &entry.entry;
-            if (qe->value) {
-                if (CFBytes_new(qe->value, qe->sz, c->datapath, c->cc, &val) != 0) {
-                    printf("Error allocating CFBytes for pointer %p, size %lu.\n", qe->value, qe->sz);
+        while(node && rangelen--) {
+            if (node->entry) {
+                if (CFBytes_new(node->entry, node->sz, c->datapath, c->cc, &val) != 0) {
+                    printf("Error allocating CFBytes for pointer %p, size %lu.\n", node->entry, node->sz);
                     exit(1);
                 }
                 VariableList_CFBytes_append(vals, val);
@@ -474,8 +481,8 @@ void addListRangeReplyCf(client *c, robj *o, long start, long end, int reverse) 
                 exit(1);
                 // addReplyBulkLongLong(c,qe->longval);
             }
+            node = reverse ? node->prev : node->next;
         }
-        listTypeReleaseIterator(iter);
     } else {
         serverPanic("Unknown list encoding");
     }

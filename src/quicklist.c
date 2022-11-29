@@ -589,6 +589,36 @@ int quicklistPushTail(quicklist *quicklist, void *value, size_t sz) {
     return (orig_tail != quicklist->tail);
 }
 
+/* No listpacking, just a simple doubly-linked list. */
+int quicklistPushTailZeroCopy(quicklist *quicklist, void *value, size_t sz) {
+    quicklistNode *orig_tail = quicklist->tail;
+    quicklistNode *node = quicklistCreateNode();
+    node->entry = value;
+    node->sz = sz;
+
+    // _quicklistInsertNodeAfter(quicklist, quicklist->tail, node);
+    quicklistNode *old_node = quicklist->tail;
+    quicklistNode *new_node = node;
+    new_node->prev = old_node;
+    if (old_node) {
+        new_node->next = old_node->next;
+        if (old_node->next)
+            old_node->next->prev = new_node;
+        old_node->next = new_node;
+    }
+    if (quicklist->tail == old_node)
+        quicklist->tail = new_node;
+    /* If this insert creates the only element so far, initialize head/tail. */
+    if (quicklist->len == 0) {
+        quicklist->head = quicklist->tail = new_node;
+    }
+
+    quicklist->len++;
+    quicklist->count++;
+    quicklist->tail->count++;
+    return (orig_tail != quicklist->tail);
+}
+
 /* Create new node consisting of a pre-formed listpack.
  * Used for loading RDBs where entire listpacks have been stored
  * to be retrieved later. */

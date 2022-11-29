@@ -159,6 +159,7 @@ void quicklistSetOptions(quicklist *quicklist, int fill, int depth);
 void quicklistRelease(quicklist *quicklist);
 int quicklistPushHead(quicklist *quicklist, void *value, const size_t sz);
 int quicklistPushTail(quicklist *quicklist, void *value, const size_t sz);
+int quicklistPushTailZeroCopy(quicklist *quicklist, void *value, size_t sz);
 void quicklistPush(quicklist *quicklist, void *value, const size_t sz,
                    int where);
 void quicklistAppendListpack(quicklist *quicklist, unsigned char *zl);

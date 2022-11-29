@@ -2840,7 +2840,10 @@ void initServer(void) {
                     if (value_ptr != NULL) {
                         // -1 is the tail of the list
                         // TODO: can we import from t_list.h directly?
-                        listTypePush(list, value_obj, -1);
+                        if (server.use_cornflakes)
+                            listTypePushZeroCopy(list, value_obj, LIST_TAIL);
+                        else
+                            listTypePush(list, value_obj, LIST_TAIL);
                     }
                 }
                 dbAdd(&server.db[0], k, list);

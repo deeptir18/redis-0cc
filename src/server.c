@@ -1757,6 +1757,11 @@ void afterSleep(struct aeEventLoop *eventLoop) {
 void createSharedObjects(void) {
     int j;
 
+    /* Shared Cornflakes objects */
+    shared.get = createObject(OBJ_STRING, sdsnew("GET"));
+    shared.mget = createObject(OBJ_STRING, sdsnew("MGET"));
+    shared.lrange = createObject(OBJ_STRING, sdsnew("LRANGE"));
+
     /* Shared command responses */
     shared.crlf = createObject(OBJ_STRING,sdsnew("\r\n"));
     shared.ok = createObject(OBJ_STRING,sdsnew("+OK\r\n"));
@@ -7502,8 +7507,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         t2 = clock();
 #endif
         if (msg_type == 0) {
-            c->cmd = dictFetchValue(s->commands,
-                    createObject(OBJ_STRING, sdsnew("GET"))->ptr);
+            c->cmd = dictFetchValue(s->commands, shared.get->ptr);
 #ifdef __TIMERS__
             add_latency(&step1_dist, clock() - t2);
             t2 = clock();
@@ -7513,8 +7517,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             add_latency(&step2_dist, clock() - t2);
 #endif
         } else if (msg_type == 2) {
-            c->cmd = dictFetchValue(s->commands,
-                createObject(OBJ_STRING,sdsnew("MGET"))->ptr);
+            c->cmd = dictFetchValue(s->commands, shared.mget->ptr);
 #ifdef __TIMERS__
             add_latency(&step1_dist, clock() - t2);
             t2 = clock();
@@ -7524,8 +7527,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             add_latency(&step2_dist, clock() - t2);
 #endif
         } else if (msg_type == 4) {
-            c->cmd = dictFetchValue(s->commands,
-                    createObject(OBJ_STRING, sdsnew("LRANGE"))->ptr);  
+            c->cmd = dictFetchValue(s->commands, shared.lrange->ptr);
 #ifdef __TIMERS__
             add_latency(&step1_dist, clock() - t2);
             t2 = clock();

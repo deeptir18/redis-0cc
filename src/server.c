@@ -71,7 +71,7 @@
 #include <sys/sysctl.h>
 #endif
 
-#define __TIMERS__ 1
+// #define __TIMERS__ 1
 #ifdef __TIMERS__
 typedef struct Latency_Dist_t
 {

@@ -1761,6 +1761,12 @@ void createSharedObjects(void) {
     shared.get = createObject(OBJ_STRING, sdsnew("GET"));
     shared.mget = createObject(OBJ_STRING, sdsnew("MGET"));
     shared.lrange = createObject(OBJ_STRING, sdsnew("LRANGE"));
+    GetReq_new_in(server.arena, &shared.getreq);
+    GetMReq_new_in(server.arena, &shared.mgetreq);
+    GetListReq_new_in(server.arena, &shared.lrangereq);
+    GetResp_new_in(server.arena, &shared.getres);
+    GetMResp_new_in(server.arena, &shared.mgetres);
+    GetListResp_new_in(server.arena, &shared.lrangeres);
 
     /* Shared command responses */
     shared.crlf = createObject(OBJ_STRING,sdsnew("\r\n"));
@@ -7459,7 +7465,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         // STEP 1: Deserialize the incoming request.
         
         if (msg_type == 0) {
-            GetReq_new_in(s->arena, &c->cf_req);
+            c->cf_req = shared.getreq;
             if (GetReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetReq\n");
                 exit(1);
@@ -7470,7 +7476,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             GetResp_set_id(c->cf_res, msg_id);
         
         } else if (msg_type == 2) {
-            GetMReq_new_in(s->arena, &c->cf_req);
+            c->cf_req = shared.mgetreq;
             if (GetMReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetMReq\n");
                 exit(1);
@@ -7482,7 +7488,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             GetMReq_get_id(c->cf_req, &msg_id);
             GetMResp_set_id(c->cf_res, msg_id);
         } else if (msg_type == 4) {
-            GetListReq_new_in(s->arena, &c->cf_req);
+            c->cf_req = shared.lrangereq;
             if (GetListReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetListReq\n");
                 exit(1);
@@ -7548,8 +7554,6 @@ int cornflakesProcessEventsCf(struct redisServer *s,
                 printf("Error queueing GetResp: returned %d\n", ret);
                 exit(1);
             }
-            // drop the incoming deserialized request
-            GetReq_free(c->cf_req);
         } else if (msg_type == 2) {
             int ret = Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
                 msg_id, conn_id, c->cc, c->cf_res, j == n-1);
@@ -7557,16 +7561,12 @@ int cornflakesProcessEventsCf(struct redisServer *s,
                 printf("Error queueing GetMResp: returned %d\n", ret);
                 exit(1);
             }
-            // drop the incoming deserialized request
-            GetMReq_free(c->cf_req);
         } else if (msg_type == 4) {
             int ret = Mlx5Connection_GetListResp_queue_cornflakes_obj(s->datapath, msg_id, conn_id, c->cc, c->cf_res, j == n-1);
             if (ret != 0) {
                 printf("Error queueing GetListResp: returned %d\n", ret);
                 exit(1);
             }
-            // drop the incoming deserialized request
-            GetListReq_free(c->cf_req);
         }
 #ifdef __TIMERS__
         add_latency(&serialize_dist, clock() - t1);

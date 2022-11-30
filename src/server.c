@@ -7466,35 +7466,33 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         
         if (msg_type == 0) {
             c->cf_req = shared.getreq;
+            c->cf_res = shared.getres;
             if (GetReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetReq\n");
                 exit(1);
             }
 
-            GetResp_new_in(s->arena, &c->cf_res);
             GetReq_get_id(c->cf_req, &msg_id);
             GetResp_set_id(c->cf_res, msg_id);
         
         } else if (msg_type == 2) {
             c->cf_req = shared.mgetreq;
+            c->cf_res = shared.mgetres;
             if (GetMReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetMReq\n");
                 exit(1);
             }
 
-            // Initialize the response object.
-            // TODO: Free GetMReq. GetMResp is freed in queue_cornflakes_obj.
-            GetMResp_new_in(s->arena, &c->cf_res);
             GetMReq_get_id(c->cf_req, &msg_id);
             GetMResp_set_id(c->cf_res, msg_id);
         } else if (msg_type == 4) {
             c->cf_req = shared.lrangereq;
+            c->cf_res = shared.lrangeres;
             if (GetListReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing GetListReq\n");
                 exit(1);
             }
 
-            GetListResp_new_in(s->arena, &c->cf_res);
             GetListReq_get_id(c->cf_req, &msg_id);
             GetListResp_set_id(c->cf_res, msg_id);
         }

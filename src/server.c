@@ -7588,7 +7588,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
 #ifdef __TIMERS__
     t1 = clock();
 #endif
-    Bump_reset(s->arena);
+    // Bump_reset(s->arena);
 #ifdef __TIMERS__
     add_latency(&deallocation_dist, clock() - t1);
 #endif

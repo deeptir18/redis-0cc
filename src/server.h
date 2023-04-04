@@ -1092,7 +1092,6 @@ typedef struct client {
     void *cf_req;               /* Cornflakes request object */
     void *cf_res;               /* Cornflakes response object */
     void *arena;                /* bumpalo::Bump */
-    void *cc;                   /* CopyContext */
 
     uint64_t id;            /* Client incremental unique ID. */
     uint64_t flags;         /* Client flags: CLIENT_* macros. */

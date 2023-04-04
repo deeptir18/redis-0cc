@@ -38,7 +38,7 @@
 #include "functions.h"
 #include "syscheck.h"
 #include "mlx5_datapath.h"
-#include "kv_sga_cornflakes.h"
+#include "kv_redis.h"
 
 #include <time.h>
 #include <signal.h>
@@ -2743,10 +2743,6 @@ void initServer(void) {
     if (server.use_cornflakes) {
         server.c->datapath = server.datapath;
         server.c->arena = server.arena;
-        if (CopyContext_new(server.arena, server.datapath, &server.c->cc) != 0) {
-            printf("Error allocating CopyContext\n");
-            exit(1);
-        }
     }
 
     const char *inline_mode = getenv("INLINE_MODE");
@@ -2784,7 +2780,7 @@ void initServer(void) {
     const char *server_db_trace = getenv("YCSB_TRACE");
     if (server_db_trace != NULL) {
         /* Step 1: Load rust backing db or rust backing list db (pointer to rust hashmap) */
-        int ret = Mlx5Connection_load_ycsb_db(server.datapath, server_db_trace, &server.rust_backing_db, &server.rust_backing_list_db, num_keys, num_values, value_size_str);
+        int ret = Mlx5Connection_load_ycsb_db(server.datapath, server_db_trace, &server.rust_backing_db, &server.rust_backing_list_db, num_keys, num_values, value_size_str, false);
         if (ret != 0) {
             printf("Error: Could not run Mlx5_load_dbs with file %s\n", server_db_trace);
             exit(1);
@@ -7543,7 +7539,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         ReceivedPkt_conn_id(pkts[j], &conn_id);
 
         if (msg_type == 0) {
-            int ret = Mlx5Connection_GetResp_queue_cornflakes_obj(s->datapath, msg_id, conn_id, c->cc, c->cf_res, j == n-1);
+            int ret = Mlx5Connection_GetResp_queue_cornflakes_arena_object(s->datapath, msg_id, conn_id, c->cf_res, j == n-1);
             if (ret != 0) {
                 printf("Error queueing GetResp: returned %d\n", ret);
                 exit(1);
@@ -7551,8 +7547,8 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             // drop the incoming deserialized request
             GetReq_free(c->cf_req);
         } else if (msg_type == 2) {
-            int ret = Mlx5Connection_GetMResp_queue_cornflakes_obj(s->datapath,
-                msg_id, conn_id, c->cc, c->cf_res, j == n-1);
+            int ret = Mlx5Connection_GetMResp_queue_cornflakes_arena_object(s->datapath,
+                msg_id, conn_id, c->cf_res, j == n-1);
             if (ret != 0) {
                 printf("Error queueing GetMResp: returned %d\n", ret);
                 exit(1);
@@ -7560,7 +7556,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             // drop the incoming deserialized request
             GetMReq_free(c->cf_req);
         } else if (msg_type == 4) {
-            int ret = Mlx5Connection_GetListResp_queue_cornflakes_obj(s->datapath, msg_id, conn_id, c->cc, c->cf_res, j == n-1);
+            int ret = Mlx5Connection_GetListResp_queue_cornflakes_arena_object(s->datapath, msg_id, conn_id, c->cf_res, j == n-1);
             if (ret != 0) {
                 printf("Error queueing GetListResp: returned %d\n", ret);
                 exit(1);
@@ -7572,11 +7568,6 @@ int cornflakesProcessEventsCf(struct redisServer *s,
         add_latency(&serialize_dist, clock() - t1);
         t1 = clock();
 #endif
-        // reset the copy context if used.
-        CopyContext_data_len(c->cc, &data_len);
-        if (data_len != 0) {
-            CopyContext_reset(c->cc);
-        }
         // drop the incoming received packet
         ReceivedPkt_free(pkts[j]);
 #ifdef __TIMERS__

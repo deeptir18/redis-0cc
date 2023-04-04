@@ -28,7 +28,7 @@
  */
 
 #include "server.h"
-#include "kv_sga_cornflakes.h"
+#include "kv_redis.h"
 
 /*-----------------------------------------------------------------------------
  * List API
@@ -466,10 +466,9 @@ void addListRangeReplyCf(client *c, robj *o, long start, long end, int reverse) 
     if (o->encoding == OBJ_ENCODING_QUICKLIST) {
         quicklist *quicklist = o->ptr;
         quicklistNode *node = reverse ? quicklist->tail : quicklist->head;
-
         while(node && rangelen--) {
             if (node->entry) {
-                if (CFBytes_new(node->entry, node->sz, c->datapath, c->cc, &val) != 0) {
+                if (CFBytes_new(node->entry, node->sz, c->datapath, c->arena, &val) != 0) {
                     printf("Error allocating CFBytes for pointer %p, size %lu.\n", node->entry, node->sz);
                     exit(1);
                 }

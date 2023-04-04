@@ -28,7 +28,7 @@
  */
 
 #include "server.h"
-#include "kv_sga_cornflakes.h"
+#include "kv_redis.h"
 #include <math.h> /* isnan(), isinf() */
 
 /* Forward declarations */
@@ -329,12 +329,12 @@ int getCommandCf(client *c) {
     if (o == NULL) {
         // TODO: What should we return if the key doesn't exist? Probably
         // whatever Redis returns. Currently uses the key as the value.
-        if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->cc, &val) != 0) {
+        if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->arena, &val) != 0) {
             printf("Error allocating CFBytes");
             exit(1);
         }
     } else {
-        if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->cc, &val) != 0) {
+        if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->arena, &val) != 0) {
             printf("Error allocating CFBytes");
             exit(1);
         }
@@ -623,12 +623,12 @@ void mgetCommandCf(client *c) {
         if (o == NULL) {
             // TODO: What should we return if the key doesn't exist? Probably
             // whatever Redis returns. Currently uses the key as the value.
-            if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->cc, &val) != 0) {
+            if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->arena, &val) != 0) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }
         } else {
-            if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->cc, &val) != 0) {
+            if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->arena, &val) != 0) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }

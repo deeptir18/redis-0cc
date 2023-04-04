@@ -122,9 +122,9 @@ DEBUG=-g -ggdb
 
 # Cornflakes
 # export CORNFLAKES_PATH = /mydata/deeptir/cornflakes
-FINAL_CFLAGS+=-I $(CORNFLAKES_PATH)/mlx5-datapath-c -I $(CORNFLAKES_PATH)/cf-kv/c/kv-sga-cornflakes-c
-FINAL_LDFLAGS+=-L$(CORNFLAKES_PATH)/target/release -L$(CORNFLAKES_PATH)/cf-kv/c/kv-sga-cornflakes-c/target/release
-FINAL_LIBS+=-lmlx5_datapath_c -lkv_sga_cornflakes_c
+FINAL_CFLAGS+=-I $(CORNFLAKES_PATH)/mlx5-datapath-c -I $(CORNFLAKES_PATH)/cf-kv/c/kv-redis-c
+FINAL_LDFLAGS+=-L$(CORNFLAKES_PATH)/target/release -L$(CORNFLAKES_PATH)/cf-kv/c/kv-redis-c/target/release
+FINAL_LIBS+=-lmlx5_datapath_c -lkv_redis_c
 
 ifneq ($(DEMIKERNEL_REPO_DIR),)
 export DEMIKERNEL_INCLUDE_DIR ?= $(DEMIKERNEL_REPO_DIR)/include

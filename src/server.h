@@ -1228,7 +1228,7 @@ struct sentinelConfig {
 };
 
 struct sharedObjectsStruct {
-    robj *get, *mget, *lrange,
+    robj *get, *mget, *lrange, *set,
     *crlf, *ok, *err, *emptybulk, *czero, *cone, *pong, *space,
     *queued, *null[4], *nullarray[4], *emptymap[4], *emptyset[4],
     *emptyarray, *wrongtypeerr, *nokeyerr, *syntaxerr, *sameobjecterr,

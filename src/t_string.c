@@ -141,6 +141,36 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
     }
 }
 
+/**
+ * Modified version of setGenericCommand() that implements the SET operation
+ * for only the SET command without its variations.
+ */
+void setCommandCf(client *c) {
+    void* k = NULL;   // CFString*
+    void* v = NULL;   // CFBytes*
+    const unsigned char* k_buffer, v_buffer;
+    size_t k_buffer_len, v_buffer_len;
+
+    // Parse key and value from request
+    PutReq_get_key(c->cf_req, &k);
+    PutReq_get_val(c->cf_req, &v);
+    CFString_unpack(k, &k_buffer, &k_buffer_len);
+    CFBytes_unpack(v, &v_buffer, &v_buffer_len);
+    //printf("key = %.*s\n", (int)k_buffer_len, k_buffer);
+    //printf("val = %.*s\n", (int)v_buffer_len, v_buffer);
+    robj *key = createStringObject((char *)key_buffer, key_buffer_len);
+    robj *val = createStringObject((char *)val_buffer, val_buffer_len);
+
+    int found = lookupKeyWrite(c->db,key) != NULL;
+    int setkey_flags = found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
+
+    // TODO(ygina): Do something special here to free the previous value in
+    // pinned memory, and to ensure the new value is stored in pinned memory.
+    setKey(c,c->db,key,val,setkey_flags);
+    server.dirty++;
+    notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
+}
+
 /*
  * Extract the `expire` argument of a given GET/SET command as an absolute timestamp in milliseconds.
  *
@@ -285,16 +315,20 @@ int parseExtendedStringArgumentsOrReply(client *c, int *flags, int *unit, robj *
 /* SET key value [NX] [XX] [KEEPTTL] [GET] [EX <seconds>] [PX <milliseconds>]
  *     [EXAT <seconds-timestamp>][PXAT <milliseconds-timestamp>] */
 void setCommand(client *c) {
-    robj *expire = NULL;
-    int unit = UNIT_SECONDS;
-    int flags = OBJ_NO_FLAGS;
+    if (c->use_cornflakes) {
+        setCommandCf(c);
+    } else {
+        robj *expire = NULL;
+        int unit = UNIT_SECONDS;
+        int flags = OBJ_NO_FLAGS;
 
-    if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_SET) != C_OK) {
-        return;
+        if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_SET) != C_OK) {
+            return;
+        }
+
+        c->argv[2] = tryObjectEncoding(c->argv[2]);
+        setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
     }
-
-    c->argv[2] = tryObjectEncoding(c->argv[2]);
-    setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
 
 void setnxCommand(client *c) {

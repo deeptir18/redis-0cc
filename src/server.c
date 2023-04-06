@@ -1761,7 +1761,6 @@ void createSharedObjects(void) {
     shared.get = createObject(OBJ_STRING, sdsnew("GET"));
     shared.mget = createObject(OBJ_STRING, sdsnew("MGET"));
     shared.lrange = createObject(OBJ_STRING, sdsnew("LRANGE"));
-    shared.set = createObject(OBJ_STRING, sdsnew("SET"));
 
     /* Shared command responses */
     shared.crlf = createObject(OBJ_STRING,sdsnew("\r\n"));

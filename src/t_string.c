@@ -148,7 +148,7 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
 void setCommandCf(client *c) {
     void* k = NULL;   // CFString*
     void* v = NULL;   // CFBytes*
-    const unsigned char* k_buffer, v_buffer;
+    const unsigned char *k_buffer, *v_buffer;
     size_t k_buffer_len, v_buffer_len;
 
     // Parse key and value from request
@@ -158,8 +158,8 @@ void setCommandCf(client *c) {
     CFBytes_unpack(v, &v_buffer, &v_buffer_len);
     //printf("key = %.*s\n", (int)k_buffer_len, k_buffer);
     //printf("val = %.*s\n", (int)v_buffer_len, v_buffer);
-    robj *key = createStringObject((char *)key_buffer, key_buffer_len);
-    robj *val = createStringObject((char *)val_buffer, val_buffer_len);
+    robj *key = createStringObject((char *)k_buffer, k_buffer_len);
+    robj *val = createStringObject((char *)v_buffer, v_buffer_len);
 
     int found = lookupKeyWrite(c->db,key) != NULL;
     int setkey_flags = found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;

@@ -1089,6 +1089,7 @@ typedef struct client {
     /* Cornflakes */
     int use_cornflakes;         /* Whether to use Cornflakes serialization */
     void *datapath;             /* MLX5 connection */
+    void *mempool_ids_ptr;      /* Mempool Ids vec */
     void *cf_req;               /* Cornflakes request object */
     void *cf_res;               /* Cornflakes response object */
     void *arena;                /* bumpalo::Bump */
@@ -1228,7 +1229,7 @@ struct sentinelConfig {
 };
 
 struct sharedObjectsStruct {
-    robj *get, *mget, *lrange, *set,
+    robj *get, *mget, *lrange, *put,
     *crlf, *ok, *err, *emptybulk, *czero, *cone, *pong, *space,
     *queued, *null[4], *nullarray[4], *emptymap[4], *emptyset[4],
     *emptyarray, *wrongtypeerr, *nokeyerr, *syntaxerr, *sameobjecterr,
@@ -1464,6 +1465,7 @@ struct redisServer {
     void *datapath;             /* MLX5 connection */
     void *rust_backing_db;      /* Backing Rust DB for single kv pairs */
     void *rust_backing_list_db; /* Backing Rust DB for k->list pairs */
+    void *mempool_ids_ptr;      /* Backing mempool ids */
     void *arena;                /* bumpalo::Bump */
     struct client *c;           /* Redis client */
 
@@ -2642,7 +2644,7 @@ void freeHashObject(robj *o);
 void dismissObject(robj *o, size_t dump_size);
 robj *createObject(int type, void *ptr);
 robj *createStringObject(const char *ptr, size_t len);
-robj *createZeroCopyStringObject(char *ptr, size_t len);
+robj *createZeroCopyStringObject(char *ptr, size_t len, void *smart_ptr);
 robj *createRawStringObject(const char *ptr, size_t len);
 robj *createEmbeddedStringObject(const char *ptr, size_t len);
 robj *tryCreateRawStringObject(const char *ptr, size_t len);

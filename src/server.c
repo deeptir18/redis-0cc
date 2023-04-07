@@ -1761,7 +1761,7 @@ void createSharedObjects(void) {
     shared.get = createObject(OBJ_STRING, sdsnew("GET"));
     shared.mget = createObject(OBJ_STRING, sdsnew("MGET"));
     shared.lrange = createObject(OBJ_STRING, sdsnew("LRANGE"));
-    shared.set = createObject(OBJ_STRING, sdsnew("SET"));
+    shared.put = createObject(OBJ_STRING, sdsnew("SET"));
 
     /* Shared command responses */
     shared.crlf = createObject(OBJ_STRING,sdsnew("\r\n"));
@@ -2744,6 +2744,7 @@ void initServer(void) {
     if (server.use_cornflakes) {
         server.c->datapath = server.datapath;
         server.c->arena = server.arena;
+        server.c->mempool_ids_ptr = server.mempool_ids_ptr;
     }
 
     const char *inline_mode = getenv("INLINE_MODE");
@@ -2764,6 +2765,12 @@ void initServer(void) {
     const char *num_keys_str = getenv("NUM_KEYS");
     size_t num_keys = 1;
     const char *value_size_str = getenv("VALUE_SIZE");
+
+    // Twitter options
+    size_t min_keys_to_load = 4000000;
+    const char *min_keys_to_load_str = getenv("MIN_KEYS_TO_LOAD");
+    size_t twitter_end_time = 5;
+    const char *twitter_end_time_str = getenv("TWITTER_END_TIME");
     char *ptr = NULL;
     
     if (num_values_str != NULL) {
@@ -2775,18 +2782,49 @@ void initServer(void) {
     if (value_size_str == NULL) {
         value_size_str = "UniformOverSizes-1024";
     }
-
     printf("SETTING VALUESIZE: %s\n", value_size_str);
+    if (min_keys_to_load_str != NULL) {
+        min_keys_to_load = (size_t)(strtol(min_keys_to_load_str, &ptr, 10));
+    }
+    if (twitter_end_time_str != NULL) {
+        twitter_end_time = (size_t)(strtol(twitter_end_time_str, &ptr, 10));
+    }
 
-    const char *server_db_trace = getenv("YCSB_TRACE");
-    if (server_db_trace != NULL) {
+
+    const char *ycsb_db_trace = getenv("YCSB_TRACE");
+    const char *twitter_db_trace = getenv("TWITTER_TRACE");
+    if ((ycsb_db_trace == NULL) && (twitter_db_trace == NULL)) {
+        printf("Error: either YCSB_TRACE or TWITTER_TRACE must be set");
+        exit(1);
+    }
+    if ((ycsb_db_trace != NULL) && (twitter_db_trace != NULL)) {
+        printf("Error: only one of YCSB_TRACE or TWITTER_TRACE must be set");
+        exit(1);
+    }
+    if (ycsb_db_trace != NULL) {
         /* Step 1: Load rust backing db or rust backing list db (pointer to rust hashmap) */
-        int ret = Mlx5Connection_load_ycsb_db(server.datapath, server_db_trace, &server.rust_backing_db, &server.rust_backing_list_db, num_keys, num_values, value_size_str, false);
+        int ret = Mlx5Connection_load_ycsb_db(server.datapath, ycsb_db_trace, &server.rust_backing_db, &server.rust_backing_list_db, &server.mempool_ids_ptr, num_keys, num_values, value_size_str, false);
         if (ret != 0) {
-            printf("Error: Could not run Mlx5_load_dbs with file %s\n", server_db_trace);
+            printf("Error: Could not run YCSB Mlx5_load_dbs with file %s\n", ycsb_db_trace);
             exit(1);
         }
-        
+    } else if (twitter_db_trace != NULL) {
+        int ret = Mlx5Connection_load_twitter_db(
+                server.datapath,
+                twitter_db_trace,
+                twitter_end_time,
+                min_keys_to_load,
+                &server.rust_backing_db,
+                &server.rust_backing_list_db,
+                &server.mempool_ids_ptr);
+        if (ret != 0) {
+            printf("Error: Could not run twitter Mlx5_load_dbs with file %s\n", twitter_db_trace);
+            exit(1);
+        }
+                
+              
+    }
+    if ((ycsb_db_trace != NULL) || (twitter_db_trace != NULL)) {
         /* Step 2: Iterate over the rust backing db to load redis server */
         void *db_keys_vec;
         size_t db_keys_len = 0;
@@ -2801,13 +2839,22 @@ void initServer(void) {
         size_t key_len = 0;
         void *value_ptr = NULL;
         size_t value_len = 0;
+        void *value_box_ptr = NULL;
         for (size_t key_idx = 0; key_idx < db_keys_len; key_idx++) {
-            Mlx5Connection_get_db_value_at(server.rust_backing_db, db_keys_vec, key_idx, &key_ptr, &key_len, &value_ptr, &value_len);
+            Mlx5Connection_get_db_value_at(server.rust_backing_db, db_keys_vec, key_idx, &key_ptr, &key_len, &value_ptr, &value_len, &value_box_ptr);
             if (key_ptr != NULL && value_ptr != NULL) {
-                /* for keys - just use plain redis sds strings */
-                robj *k = createStringObject((char *)key_ptr, key_len);
-                robj *v = createZeroCopyStringObject((char *)value_ptr, value_len);
-                dbAdd(&server.db[0], k, v);
+                if (server.use_cornflakes) {
+                    /* for keys - just use plain redis sds strings */
+                    robj *k = createStringObject((char *)key_ptr, key_len);
+                    robj *v = createZeroCopyStringObject((char *)value_ptr, value_len, value_box_ptr);
+                    dbAdd(&server.db[0], k, v);
+                } else {
+                    /* for keys and values - just use plain redis sds strings */
+                    robj *k = createStringObject((char *)key_ptr, key_len);
+                    robj *v = createStringObject((char *)value_ptr, value_len);
+                    dbAdd(&server.db[0], k, v);
+                    Mlx5Connection_free_datapath_buffer(value_box_ptr);
+                }
             } else {
                 printf("ERROR: Could not load value for key %lu from kv store", key_idx);
             }
@@ -2832,15 +2879,17 @@ void initServer(void) {
                 robj *list = createQuicklistObject();
                 quicklistSetOptions(list->ptr, server.list_max_listpack_size, server.list_compress_depth);
                 for (size_t list_idx = 0; list_idx < list_size; list_idx++) {
-                    Mlx5Connection_list_db_get_value_at_idx(server.rust_backing_list_db, list_db_keys_vec, key_idx, list_idx, &value_ptr, &value_len);
-                    robj *value_obj = createZeroCopyStringObject((char *)value_ptr, value_len);
-                    if (value_ptr != NULL) {
-                        // -1 is the tail of the list
-                        // TODO: can we import from t_list.h directly?
-                        if (server.use_cornflakes)
-                            listTypePushZeroCopy(list, value_obj, LIST_TAIL);
-                        else
-                            listTypePush(list, value_obj, LIST_TAIL);
+                    Mlx5Connection_list_db_get_value_at_idx(server.rust_backing_list_db, list_db_keys_vec, key_idx, list_idx, &value_ptr, &value_len, &value_box_ptr);
+                    assert(value_ptr != NULL);
+                    if (server.use_cornflakes) {
+                        robj *value_obj = createZeroCopyStringObject((char *)value_ptr, value_len, value_box_ptr);
+                        listTypePushZeroCopy(list, value_obj, LIST_TAIL);
+                    } else {
+                        robj *value_obj = createStringObject((char *)value_ptr, value_len);
+                        listTypePush(list, value_obj, LIST_TAIL);
+                        // can free original box as we store value in normal
+                        // redis string
+                        Mlx5Connection_free_datapath_buffer(value_box_ptr);
                     }
                 }
                 dbAdd(&server.db[0], k, list);
@@ -2849,8 +2898,8 @@ void initServer(void) {
                 break;
             }
         }
-
-
+        // drop the DBs. Nothing should break
+        Mlx5Connection_drop_dbs(server.rust_backing_db, server.rust_backing_list_db);
         
     }
 
@@ -7440,7 +7489,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     uint16_t msg_type;
     uint16_t msg_size;
     uint32_t msg_id;
-    size_t conn_id, data_len;
+    size_t conn_id;
 #ifdef __TIMERS__
     add_latency(&client_alloc_dist, clock() - t1);
 #endif
@@ -7465,14 +7514,12 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             GetResp_new_in(s->arena, &c->cf_res);
             GetReq_get_id(c->cf_req, &msg_id);
             GetResp_set_id(c->cf_res, msg_id);
-        
         } else if (msg_type == 1) {
             PutReq_new_in(s->arena, &c->cf_req);
             if (PutReq_deserialize(c->cf_req, pkts[j], CORNFLAKES_REQ_TYPE_SIZE, s->arena) != 0) {
                 printf("Error deserializing PutReq\n");
                 exit(1);
             }
-
             PutResp_new_in(s->arena, &c->cf_res);
             PutReq_get_id(c->cf_req, &msg_id);
             PutResp_set_id(c->cf_res, msg_id);
@@ -7519,7 +7566,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             add_latency(&step2_dist, clock() - t2);
 #endif
         } else if (msg_type == 1) {
-            c->cmd = dictFetchValue(s->commands, shared.set->ptr);
+            c->cmd = dictFetchValue(s->commands, shared.put->ptr);
 #ifdef __TIMERS__
             add_latency(&step1_dist, clock() - t2);
             t2 = clock();
@@ -7568,7 +7615,13 @@ int cornflakesProcessEventsCf(struct redisServer *s,
             // drop the incoming deserialized request
             GetReq_free(c->cf_req);
         } else if (msg_type == 1) {
-            int ret = Mlx5Connection_PutResp_queue_cornflakes_arena_object(s->datapath, msg_id, conn_id, c->cf_res, j == n-1);
+            int ret = Mlx5Connection_PutResp_queue_cornflakes_arena_object(
+                    s->datapath,
+                    msg_id,
+                    conn_id,
+                    c->cf_res,
+                    j == n-1
+                    );
             if (ret != 0) {
                 printf("Error queueing PutResp: returned %d\n", ret);
                 exit(1);

@@ -73,8 +73,8 @@ robj *makeObjectShared(robj *o) {
     return o;
 }
 
-robj *createZeroCopyStringObject(char *ptr, size_t len) {
-    return createObject(OBJ_ZERO_COPY_STRING, rawstringnew(ptr, len));
+robj *createZeroCopyStringObject(char *ptr, size_t len, void *smart_ptr) {
+    return createObject(OBJ_ZERO_COPY_STRING, rawstringnew(ptr, len, smart_ptr));
 }
 
 /* Create a string object with encoding OBJ_ENCODING_RAW, that is a plain

@@ -43,10 +43,11 @@ extern const char *SDS_NOINIT;
 /* RawString Object: encompasses a pointer and length. Cannot grow. */
 typedef struct __attribute__ ((__packed__)) ZeroCopyString {
     size_t len;
-    char *ptr;
+    const unsigned char *ptr;
+    void *smart_ptr;
 } rawstring;
 
-rawstring *rawstringnew(char *ptr, size_t len);
+rawstring *rawstringnew(const unsigned char *ptr, size_t len, void *smart_ptr);
 
 void rawstringfree(rawstring *rawstr);
 
@@ -54,10 +55,13 @@ static inline size_t rawstringlen(rawstring *rawstr) {
     return rawstr->len;
 }
 
-static inline char *rawstringpointer(rawstring *rawstr) {
+static inline const unsigned char *rawstringpointer(rawstring *rawstr) {
     return rawstr->ptr;
 }
 
+static inline char *rawstringsmartptr(rawstring *rawstr) {
+    return rawstr->smart_ptr;
+}
 
 typedef char *sds;
 

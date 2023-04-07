@@ -45,7 +45,7 @@ void listTypePush(robj *subject, robj *value, int where) {
         if (rawStringObject(value)) {
             /* If zero-copy string object, push pointer and len manually */
             rawstring *rawstringval = (rawstring *)value->ptr;
-            quicklistPush(subject->ptr, rawstringpointer(rawstringval), rawstringlen(rawstringval), pos);
+            quicklistPush(subject->ptr, (void *)(rawstringpointer(rawstringval)), rawstringlen(rawstringval), pos);
         } else if (value->encoding == OBJ_ENCODING_INT) {
             char buf[32];
             ll2string(buf, 32, (long)value->ptr);
@@ -64,9 +64,9 @@ void listTypePushZeroCopy(robj *subject, robj *value, int where) {
     serverAssert(subject->encoding == OBJ_ENCODING_QUICKLIST);
     serverAssert(rawStringObject(value));
     serverAssert(where != LIST_HEAD);
-    void *ptr = rawstringpointer((rawstring *)value->ptr);
+    const unsigned char *ptr = rawstringpointer((rawstring *)value->ptr);
     const size_t sz = rawstringlen((rawstring *)value->ptr);
-    quicklistPushTailZeroCopy(subject->ptr, ptr, sz);
+    quicklistPushTailZeroCopy(subject->ptr, (void *)ptr, sz);
 }
 
 void *listPopSaver(unsigned char *data, size_t sz) {

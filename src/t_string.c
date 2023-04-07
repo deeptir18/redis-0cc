@@ -29,6 +29,7 @@
 
 #include "server.h"
 #include "kv_redis.h"
+#include "mlx5_datapath.h"
 #include <math.h> /* isnan(), isinf() */
 
 /* Forward declarations */
@@ -146,29 +147,54 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
  * for only the SET command without its variations.
  */
 void setCommandCf(client *c) {
-    void* k = NULL;   // CFString*
-    void* v = NULL;   // CFBytes*
-    const unsigned char* k_buffer, v_buffer;
+    void *k = NULL;   // CFString*
+    void *v = NULL;   // CFBytes*
+    void *new_val_buffer = NULL;
+    void *new_smart_ptr_buffer = NULL;
+    const unsigned char *k_buffer = NULL;
+    const unsigned char *v_buffer = NULL;
     size_t k_buffer_len, v_buffer_len;
+    bool found = false;
 
     // Parse key and value from request
     PutReq_get_key(c->cf_req, &k);
     PutReq_get_val(c->cf_req, &v);
     CFString_unpack(k, &k_buffer, &k_buffer_len);
     CFBytes_unpack(v, &v_buffer, &v_buffer_len);
-    //printf("key = %.*s\n", (int)k_buffer_len, k_buffer);
-    //printf("val = %.*s\n", (int)v_buffer_len, v_buffer);
-    robj *key = createStringObject((char *)key_buffer, key_buffer_len);
-    robj *val = createStringObject((char *)val_buffer, val_buffer_len);
 
-    int found = lookupKeyWrite(c->db,key) != NULL;
+    // create key object to query and set
+    robj *key = createStringObject((char *)k_buffer, k_buffer_len);
+
+    // lookup old object
+    robj *o = lookupKeyRead(c->db, key);
+    if (o != NULL) {
+        // free the previous value before setting the new value
+        Mlx5Connection_free_datapath_buffer(rawstringsmartptr((rawstring *)o->ptr)); 
+        rawstringfree((rawstring *)o->ptr);
+        zfree(o);
+        found = true;
+    }
+    // allocate new zero copy object from datapath, copying data in
+    new_smart_ptr_buffer = Mlx5Connection_allocate_and_copy_into_original_datapath_buffer(
+            c->datapath,
+            c->mempool_ids_ptr,
+            v_buffer,
+            v_buffer_len,
+            &new_val_buffer);
+
+    // create new value
+    robj *new_val = createZeroCopyStringObject((char *)new_val_buffer, v_buffer_len, new_smart_ptr_buffer);
+    //printf("obj that was queried: %p\n", o);
+    //printf("obj = %.*s\n", (int)rawstringlen((rawstring *)o->ptr),rawstringpointer ((rawstring *)o->ptr));
+
+    // set new value
     int setkey_flags = found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
 
-    // TODO(ygina): Do something special here to free the previous value in
-    // pinned memory, and to ensure the new value is stored in pinned memory.
-    setKey(c,c->db,key,val,setkey_flags);
+    // need to get the previous value from the db, and free it manually
+    setKey(c,c->db,key,new_val,setkey_flags);
     server.dirty++;
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
+    return;
 }
 
 /*
@@ -364,7 +390,7 @@ int getCommandCf(client *c) {
         // TODO: What should we return if the key doesn't exist? Probably
         // whatever Redis returns. Currently uses the key as the value.
         if(CFBytes_new(k->ptr, sdslen(k->ptr), c->datapath, c->arena, &val) != 0) {
-            printf("Error allocating CFBytes");
+            printf("Error allocating CFBytes print");
             exit(1);
         }
     } else {

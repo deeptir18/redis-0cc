@@ -41,11 +41,12 @@
 
 const char *SDS_NOINIT = "SDS_NOINIT";
 
-rawstring *rawstringnew(char *ptr, size_t len) {
+rawstring *rawstringnew(const unsigned char *ptr, size_t len, void *smart_ptr) {
     // TODO: is zmalloc the right thing to use here?
     rawstring *rawstr = (rawstring *)(zmalloc(sizeof(rawstring)));
     rawstr->len = len;
     rawstr->ptr = ptr;
+    rawstr->smart_ptr = smart_ptr;
     return rawstr;
 }
 

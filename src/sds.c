@@ -51,7 +51,7 @@ rawstring *rawstringnew(const unsigned char *ptr, size_t len, void *smart_ptr) {
 }
 
 void rawstringfree(rawstring *rawstr) {
-    free(rawstr);
+    zfree(rawstr);
 }
 
 static inline int sdsHdrSize(char type) {

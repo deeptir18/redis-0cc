@@ -648,7 +648,6 @@ typedef enum {
 #define OBJ_SET 2       /* Set object. */
 #define OBJ_ZSET 3      /* Sorted set object. */
 #define OBJ_HASH 4      /* Hash object. */
-#define OBJ_ZERO_COPY_STRING 5 /* Zero-Copy string object */
 
 /* The "module" object type is a special one that signals that the object
  * is one directly managed by a Redis module. In this case the value points
@@ -663,6 +662,7 @@ typedef enum {
  * encoding version. */
 #define OBJ_MODULE 5    /* Module object. */
 #define OBJ_STREAM 6    /* Stream object. */
+#define OBJ_ZERO_COPY_STRING 7 /* Zero-Copy string object */
 
 /* Extract encver / signature from a module type ID. */
 #define REDISMODULE_TYPE_ENCVER_BITS 10
@@ -2637,6 +2637,7 @@ void incrRefCount(robj *o);
 robj *makeObjectShared(robj *o);
 robj *resetRefCount(robj *obj);
 void freeStringObject(robj *o);
+void freeZeroCopyStringObject(robj *o);
 void freeListObject(robj *o);
 void freeSetObject(robj *o);
 void freeZsetObject(robj *o);
@@ -2644,7 +2645,7 @@ void freeHashObject(robj *o);
 void dismissObject(robj *o, size_t dump_size);
 robj *createObject(int type, void *ptr);
 robj *createStringObject(const char *ptr, size_t len);
-robj *createZeroCopyStringObject(char *ptr, size_t len, void *smart_ptr);
+robj *createZeroCopyStringObject(unsigned char *ptr, size_t len, void *smart_ptr);
 robj *createRawStringObject(const char *ptr, size_t len);
 robj *createEmbeddedStringObject(const char *ptr, size_t len);
 robj *tryCreateRawStringObject(const char *ptr, size_t len);

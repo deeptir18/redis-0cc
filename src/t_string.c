@@ -34,6 +34,7 @@
 
 /* Forward declarations */
 int getGenericCommand(client *c);
+int getCommandCf(client *c);
 
 /*-----------------------------------------------------------------------------
  * String Commands
@@ -124,6 +125,7 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
 
     /* Propagate without the GET argument (Isn't needed if we had expire since in that case we completely re-written the command argv) */
     if ((flags & OBJ_SET_GET) && !expire) {
+        //printf("In obj set get place\n");
         int argc = 0;
         int j;
         robj **argv = zmalloc((c->argc-1)*sizeof(robj*));
@@ -146,7 +148,7 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
  * Modified version of setGenericCommand() that implements the SET operation
  * for only the SET command without its variations.
  */
-void setCommandCf(client *c) {
+void setCommandCf(client *c, int flags, robj *expire, int unit, robj *ok_reply, robj *abort_reply) {
     void *k = NULL;   // CFString*
     void *v = NULL;   // CFBytes*
     void *new_val_buffer = NULL;
@@ -154,7 +156,6 @@ void setCommandCf(client *c) {
     const unsigned char *k_buffer = NULL;
     const unsigned char *v_buffer = NULL;
     size_t k_buffer_len, v_buffer_len;
-    bool found = false;
 
     // Parse key and value from request
     PutReq_get_key(c->cf_req, &k);
@@ -165,35 +166,83 @@ void setCommandCf(client *c) {
     // create key object to query and set
     robj *key = createStringObject((char *)k_buffer, k_buffer_len);
 
-    // lookup old object
-    robj *o = lookupKeyRead(c->db, key);
-    if (o != NULL) {
-        // free the previous value before setting the new value
-        Mlx5Connection_free_datapath_buffer(rawstringsmartptr((rawstring *)o->ptr)); 
-        rawstringfree((rawstring *)o->ptr);
-        zfree(o);
-        found = true;
-    }
-    // allocate new zero copy object from datapath, copying data in
+    // allocate new zero copy object from datapath, copying daTa in
     new_smart_ptr_buffer = Mlx5Connection_allocate_and_copy_into_original_datapath_buffer(
             c->datapath,
-            c->mempool_ids_ptr,
+            server.mempool_ids_ptr,
             v_buffer,
             v_buffer_len,
             &new_val_buffer);
 
     // create new value
-    robj *new_val = createZeroCopyStringObject((char *)new_val_buffer, v_buffer_len, new_smart_ptr_buffer);
-    //printf("obj that was queried: %p\n", o);
-    //printf("obj = %.*s\n", (int)rawstringlen((rawstring *)o->ptr),rawstringpointer ((rawstring *)o->ptr));
+    robj *new_val = createZeroCopyStringObject((unsigned char *)new_val_buffer, v_buffer_len, new_smart_ptr_buffer);
+    // set ref count to 0, as it will be incremented when it's added to the db
+    new_val->refcount = 0;
+    
+    // pasted from setCommandGeneric
+    long long milliseconds = 0; /* initialized to avoid any harmness warning */
+    int found = 0;
+    int setkey_flags = 0;
 
-    // set new value
-    int setkey_flags = found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
+    if (expire && getExpireMillisecondsOrReply(c, expire, flags, unit, &milliseconds) != C_OK) {
+        return;
+    }
 
+    if (flags & OBJ_SET_GET) {
+        if (getCommandCf(c) == C_ERR) return;
+    }
+
+    found = (lookupKeyWrite(c->db,key) != NULL);
+
+    if ((flags & OBJ_SET_NX && found) ||
+        (flags & OBJ_SET_XX && !found))
+    {
+        if (!(flags & OBJ_SET_GET)) {
+            addReply(c, abort_reply ? abort_reply : shared.null[c->resp]);
+        }
+        return;
+    }
+
+    setkey_flags |= (flags & OBJ_KEEPTTL) ? SETKEY_KEEPTTL : 0;
+    setkey_flags |= found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
+    
     // need to get the previous value from the db, and free it manually
     setKey(c,c->db,key,new_val,setkey_flags);
     server.dirty++;
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
+    
+    if (expire) {
+        setExpire(c,c->db,key,milliseconds);
+        /* Propagate as SET Key Value PXAT millisecond-timestamp if there is
+         * EX/PX/EXAT/PXAT flag. */
+        robj *milliseconds_obj = createStringObjectFromLongLong(milliseconds);
+        rewriteClientCommandVector(c, 5, shared.set, key, new_val, shared.pxat, milliseconds_obj);
+        decrRefCount(milliseconds_obj);
+        notifyKeyspaceEvent(NOTIFY_GENERIC,"expire",key,c->db->id);
+    }
+
+    if (!(flags & OBJ_SET_GET)) {
+        addReply(c, ok_reply ? ok_reply : shared.ok);
+    }
+
+    /* Propagate without the GET argument (Isn't needed if we had expire since in that case we completely re-written the command argv) */
+    if ((flags & OBJ_SET_GET) && !expire) {
+        int argc = 0;
+        int j;
+        robj **argv = zmalloc((c->argc-1)*sizeof(robj*));
+        for (j=0; j < c->argc; j++) {
+            char *a = c->argv[j]->ptr;
+            /* Skip GET which may be repeated multiple times. */
+            if (j >= 3 &&
+                (a[0] == 'g' || a[0] == 'G') &&
+                (a[1] == 'e' || a[1] == 'E') &&
+                (a[2] == 't' || a[2] == 'T') && a[3] == '\0')
+                continue;
+            argv[argc++] = c->argv[j];
+            incrRefCount(c->argv[j]);
+        }
+        replaceClientCommandVector(c, argc, argv);
+    }
     return;
 }
 
@@ -342,15 +391,22 @@ int parseExtendedStringArgumentsOrReply(client *c, int *flags, int *unit, robj *
  *     [EXAT <seconds-timestamp>][PXAT <milliseconds-timestamp>] */
 void setCommand(client *c) {
     if (c->use_cornflakes) {
-        setCommandCf(c);
+        robj *expire = NULL;
+        int unit = UNIT_SECONDS;
+        int flags = OBJ_NO_FLAGS;
+
+        /*if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_SET) != C_OK) {
+            return;
+        }*/
+        setCommandCf(c, flags, expire, unit, NULL, NULL);
     } else {
         robj *expire = NULL;
         int unit = UNIT_SECONDS;
         int flags = OBJ_NO_FLAGS;
 
-        if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_SET) != C_OK) {
+        /*if (parseExtendedStringArgumentsOrReply(c,&flags,&unit,&expire,COMMAND_SET) != C_OK) {
             return;
-        }
+        }*/
 
         c->argv[2] = tryObjectEncoding(c->argv[2]);
         setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
@@ -414,6 +470,7 @@ int getGenericCommand(client *c) {
     if (o->type != OBJ_STRING && o->type != OBJ_ZERO_COPY_STRING) {
         return C_ERR;
     }
+    //printf("Got read of object %p\n", o);
 
     addReplyBulk(c,o);
     return C_OK;

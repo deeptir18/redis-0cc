@@ -32,6 +32,7 @@
 #include "functions.h"
 #include <math.h>
 #include <ctype.h>
+#include "mlx5_datapath.h"
 
 #ifdef __CYGWIN__
 #define strtold(a,b) ((long double)strtod((a),(b)))
@@ -73,7 +74,7 @@ robj *makeObjectShared(robj *o) {
     return o;
 }
 
-robj *createZeroCopyStringObject(char *ptr, size_t len, void *smart_ptr) {
+robj *createZeroCopyStringObject(unsigned char *ptr, size_t len, void *smart_ptr) {
     return createObject(OBJ_ZERO_COPY_STRING, rawstringnew(ptr, len, smart_ptr));
 }
 
@@ -291,6 +292,13 @@ robj *createModuleObject(moduleType *mt, void *value) {
     return createObject(OBJ_MODULE,mv);
 }
 
+void freeZeroCopyStringObject(robj *o) {
+    // free underlying smart pointer
+    Mlx5Connection_free_datapath_buffer(rawstringsmartptr((rawstring *)o->ptr));
+    // free rawstring holder itself
+    rawstringfree((rawstring *)o->ptr);
+}
+
 void freeStringObject(robj *o) {
     if (o->encoding == OBJ_ENCODING_RAW) {
         sdsfree(o->ptr);
@@ -361,6 +369,7 @@ void freeStreamObject(robj *o) {
 
 void incrRefCount(robj *o) {
     if (o->refcount < OBJ_FIRST_SPECIAL_REFCOUNT) {
+        //printf("Incr refcount for obj %p: from %d to %d\n", o, o->refcount, o->refcount + 1),
         o->refcount++;
     } else {
         if (o->refcount == OBJ_SHARED_REFCOUNT) {
@@ -372,6 +381,7 @@ void incrRefCount(robj *o) {
 }
 
 void decrRefCount(robj *o) {
+    //printf("In decrRefCount for robj *o: %p with refcount %d\n", o, o->refcount);
     if (o->refcount == 1) {
         switch(o->type) {
         case OBJ_STRING: freeStringObject(o); break;
@@ -381,6 +391,7 @@ void decrRefCount(robj *o) {
         case OBJ_HASH: freeHashObject(o); break;
         case OBJ_MODULE: freeModuleObject(o); break;
         case OBJ_STREAM: freeStreamObject(o); break;
+        case OBJ_ZERO_COPY_STRING: freeZeroCopyStringObject(o); break;
         default: serverPanic("Unknown object type"); break;
         }
         zfree(o);

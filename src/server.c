@@ -2744,6 +2744,7 @@ void initServer(void) {
     if (server.use_cornflakes) {
         server.c->datapath = server.datapath;
         server.c->arena = server.arena;
+        printf("Setting mempool ids ptr as %p\n", server.c->mempool_ids_ptr);
         server.c->mempool_ids_ptr = server.mempool_ids_ptr;
     }
 
@@ -2846,13 +2847,18 @@ void initServer(void) {
                 if (server.use_cornflakes) {
                     /* for keys - just use plain redis sds strings */
                     robj *k = createStringObject((char *)key_ptr, key_len);
-                    robj *v = createZeroCopyStringObject((char *)value_ptr, value_len, value_box_ptr);
+                    robj *v = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
                     dbAdd(&server.db[0], k, v);
                 } else {
                     /* for keys and values - just use plain redis sds strings */
                     robj *k = createStringObject((char *)key_ptr, key_len);
-                    robj *v = createStringObject((char *)value_ptr, value_len);
-                    dbAdd(&server.db[0], k, v);
+                    if (twitter_db_trace != NULL) {
+                        robj *v = createStringObject((char *)value_ptr, value_len);
+                        dbAdd(&server.db[0], k, v);
+                    } else {
+                        robj *v = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
+                        dbAdd(&server.db[0], k, v);
+                    }
                     Mlx5Connection_free_datapath_buffer(value_box_ptr);
                 }
             } else {
@@ -2882,9 +2888,10 @@ void initServer(void) {
                     Mlx5Connection_list_db_get_value_at_idx(server.rust_backing_list_db, list_db_keys_vec, key_idx, list_idx, &value_ptr, &value_len, &value_box_ptr);
                     assert(value_ptr != NULL);
                     if (server.use_cornflakes) {
-                        robj *value_obj = createZeroCopyStringObject((char *)value_ptr, value_len, value_box_ptr);
+                        robj *value_obj = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
                         listTypePushZeroCopy(list, value_obj, LIST_TAIL);
                     } else {
+                        // robj *value_obj = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
                         robj *value_obj = createStringObject((char *)value_ptr, value_len);
                         listTypePush(list, value_obj, LIST_TAIL);
                         // can free original box as we store value in normal
@@ -3248,6 +3255,7 @@ int redisOpArrayAppend(redisOpArray *oa, int dbid, robj **argv, int argc, int ta
 }
 
 void redisOpArrayFree(redisOpArray *oa) {
+    printf("In redis op array free\n");
     while(oa->numops) {
         int j;
         redisOp *op;
@@ -7396,6 +7404,7 @@ int cornflakesProcessEventsRedis(struct redisServer *s,
     add_latency(&client_alloc_dist, clock() - t1);
 #endif
     for (size_t j = 0; j < n; j++) {
+        resetClient(s->c);
 #ifdef __TIMERS__
         t1 = clock();
 #endif
@@ -7484,7 +7493,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     clock_t t2;
 #endif
     int processed = 0;
-    // TODO: does this work if n>1?
+    // TODO: does this work if n>1?[Ma
     struct client *c = s->c;
     uint16_t msg_type;
     uint16_t msg_size;
@@ -7494,6 +7503,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     add_latency(&client_alloc_dist, clock() - t1);
 #endif
     for (size_t j = 0; j < n; j++) {
+        //resetClient(c);
 #ifdef __TIMERS__
         t1 = clock();
 #endif

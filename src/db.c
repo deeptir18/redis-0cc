@@ -183,6 +183,7 @@ void dbAdd(redisDb *db, robj *key, robj *val) {
     signalKeyAsReady(db, key, val->type);
     if (server.cluster_enabled) slotToKeyAddEntry(de, db);
     notifyKeyspaceEvent(NOTIFY_NEW,"new",key,db->id);
+    //printf("After dbAdd, refcount is %d for obj %p\n", val->refcount, val);
 }
 
 /* This is a special version of dbAdd() that is used only when loading
@@ -228,10 +229,12 @@ void dbOverwrite(redisDb *db, robj *key, robj *val) {
     dictSetVal(db->dict, de, val);
 
     if (server.lazyfree_lazy_server_del) {
+        //printf("In lazy free thingy\n");
         freeObjAsync(key,old,db->id);
         dictSetVal(db->dict, &auxentry, NULL);
     }
 
+    //printf("Calling dictfreeval with %p for robj o %p; fyi new val is %p\n", &auxentry, old, val);
     dictFreeVal(db->dict, &auxentry);
 }
 

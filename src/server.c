@@ -2855,11 +2855,12 @@ void initServer(void) {
                     if (twitter_db_trace != NULL) {
                         robj *v = createStringObject((char *)value_ptr, value_len);
                         dbAdd(&server.db[0], k, v);
+                        // only free in the case of doing a normal string object
+                        Mlx5Connection_free_datapath_buffer(value_box_ptr);
                     } else {
                         robj *v = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
                         dbAdd(&server.db[0], k, v);
                     }
-                    Mlx5Connection_free_datapath_buffer(value_box_ptr);
                 }
             } else {
                 printf("ERROR: Could not load value for key %lu from kv store", key_idx);
@@ -2891,7 +2892,6 @@ void initServer(void) {
                         robj *value_obj = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
                         listTypePushZeroCopy(list, value_obj, LIST_TAIL);
                     } else {
-                        // robj *value_obj = createZeroCopyStringObject((unsigned char *)value_ptr, value_len, value_box_ptr);
                         robj *value_obj = createStringObject((char *)value_ptr, value_len);
                         listTypePush(list, value_obj, LIST_TAIL);
                         // can free original box as we store value in normal
@@ -7503,7 +7503,7 @@ int cornflakesProcessEventsCf(struct redisServer *s,
     add_latency(&client_alloc_dist, clock() - t1);
 #endif
     for (size_t j = 0; j < n; j++) {
-        //resetClient(c);
+        resetClient(c);
 #ifdef __TIMERS__
         t1 = clock();
 #endif

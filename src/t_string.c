@@ -436,6 +436,7 @@ int getCommandCf(client *c) {
 
     GetReq_get_key(c->cf_req, &key);
     CFString_unpack(key, &key_buffer, &buffer_len);
+    // remember to free this!
     robj *k = createStringObject((char *)key_buffer, buffer_len);
     //printf("key = %.*s\n", (int)buffer_len, key_buffer);
     robj *o = lookupKeyRead(c->db, k);
@@ -449,11 +450,13 @@ int getCommandCf(client *c) {
             printf("Error allocating CFBytes print");
             exit(1);
         }
+        decrRefCount(k);
     } else {
         if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->arena, &val) != 0) {
             printf("Error allocating CFBytes");
             exit(1);
         }
+        decrRefCount(k);
     }
 
     // set the cf bytes pointer inside the struct
@@ -470,7 +473,7 @@ int getGenericCommand(client *c) {
     if (o->type != OBJ_STRING && o->type != OBJ_ZERO_COPY_STRING) {
         return C_ERR;
     }
-    //printf("Got read of object %p\n", o);
+    //printf("Got read of object %p with len %d\n", o, rawstringlen(o->ptr));
 
     addReplyBulk(c,o);
     return C_OK;
@@ -744,11 +747,13 @@ void mgetCommandCf(client *c) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }
+            decrRefCount(k);
         } else {
             if(CFBytes_new(rawstringpointer((rawstring *)o->ptr), rawstringlen((rawstring *)o->ptr), c->datapath, c->arena, &val) != 0) {
                 printf("Error allocating CFBytes");
                 exit(1);
             }
+            decrRefCount(k);
         }
         VariableList_CFBytes_append(vals, val);
     }

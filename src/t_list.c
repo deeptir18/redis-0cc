@@ -679,6 +679,7 @@ void lrangeCommand(client *c) {
             exit(1);
         }
         addListRangeReplyCf(c, o, start, end, 0);
+        decrRefCount(k);
     } else {
         robj *o;
         long start, end;

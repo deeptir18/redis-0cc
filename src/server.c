@@ -2758,6 +2758,21 @@ void initServer(void) {
         Mlx5Connection_set_inline_mode(server.datapath, 2);
     }
 
+    // set mempool allocation parameters
+    const char *num_registrations_str = getenv("NUM_REGISTRATIONS");
+    const char *register_at_start_str = getenv("REGISTER_AT_START");
+    size_t num_registrations = 1;
+    size_t register_at_start = 1;
+    char *ptr = NULL;
+    if (num_registrations_str != NULL) {
+         num_registrations = (size_t)(strtol(num_registrations_str, &ptr, 10));
+    }
+    if (strcmp(register_at_start_str, "false") == 0) {
+        register_at_start = 0;
+    }
+    Mlx5Connection_set_mempool_params(num_registrations, register_at_start);
+    
+
     const char *ready_file = getenv("READY_FILE");
 
     // DB ycsb options
@@ -2772,7 +2787,6 @@ void initServer(void) {
     const char *min_keys_to_load_str = getenv("MIN_KEYS_TO_LOAD");
     size_t twitter_end_time = 5;
     const char *twitter_end_time_str = getenv("TWITTER_END_TIME");
-    char *ptr = NULL;
     
     if (num_values_str != NULL) {
         num_values = (size_t)(strtol(num_values_str, &ptr, 10));
@@ -2908,6 +2922,12 @@ void initServer(void) {
         // drop the DBs. Nothing should break
         Mlx5Connection_drop_dbs(server.rust_backing_db, server.rust_backing_list_db);
         
+    }
+
+    // if using zero-copy cache, call "initialize_zero_copy_cache_thread"
+    const char *using_zcc = getenv("USING_ZERO_COPY_CACHE");
+    if (strcmp(using_zcc, "true") == 0) {
+        Mlx5Connection_initialize_zero_copy_cache_thread(server.datapath);
     }
 
     Mlx5_global_debug_init();

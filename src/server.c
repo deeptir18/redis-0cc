@@ -2759,18 +2759,23 @@ void initServer(void) {
     }
 
     // set mempool allocation parameters
+    const char *num_pages_str = getenv("NUM_PAGES");
     const char *num_registrations_str = getenv("NUM_REGISTRATIONS");
     const char *register_at_start_str = getenv("REGISTER_AT_START");
+    size_t num_pages = 64;
     size_t num_registrations = 1;
     size_t register_at_start = 1;
     char *ptr = NULL;
+    if (num_pages_str != NULL) {
+        num_pages = (size_t)(strtol(num_pages_str, &ptr, 10));
+    }
     if (num_registrations_str != NULL) {
          num_registrations = (size_t)(strtol(num_registrations_str, &ptr, 10));
     }
     if (strcmp(register_at_start_str, "false") == 0) {
         register_at_start = 0;
     }
-    Mlx5Connection_set_mempool_params(num_registrations, register_at_start);
+    Mlx5Connection_set_mempool_params(num_pages, num_registrations, register_at_start);
     
 
     const char *ready_file = getenv("READY_FILE");

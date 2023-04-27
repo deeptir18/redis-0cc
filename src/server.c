@@ -2772,8 +2772,10 @@ void initServer(void) {
     if (num_registrations_str != NULL) {
          num_registrations = (size_t)(strtol(num_registrations_str, &ptr, 10));
     }
-    if (strcmp(register_at_start_str, "false") == 0) {
-        register_at_start = 0;
+    if (register_at_start_str != NULL) {
+        if (strcmp(register_at_start_str, "false") == 0) {
+            register_at_start = 0;
+        }
     }
     Mlx5Connection_set_mempool_params(num_pages, num_registrations, register_at_start);
     
@@ -2931,8 +2933,10 @@ void initServer(void) {
 
     // if using zero-copy cache, call "initialize_zero_copy_cache_thread"
     const char *using_zcc = getenv("USING_ZERO_COPY_CACHE");
-    if (strcmp(using_zcc, "true") == 0) {
-        Mlx5Connection_initialize_zero_copy_cache_thread(server.datapath);
+    if (using_zcc != NULL) {
+        if (strcmp(using_zcc, "true") == 0) {
+            Mlx5Connection_initialize_zero_copy_cache_thread(server.datapath);
+        }
     }
 
     Mlx5_global_debug_init();
